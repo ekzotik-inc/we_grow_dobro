@@ -13,12 +13,30 @@ load_dotenv()
 log = logging.getLogger(__name__)
 
 
+# Query parameters the async driver actually understands. Everything else in a provider's URL is
+# libpq-style (sslmode, channel_binding, sslrootcert, options, …): SQLAlchemy passes the whole query
+# straight to asyncpg.connect(), which then dies with
+# "TypeError: connect() got an unexpected keyword argument '<name>'".
+_ASYNCPG_URL_PARAMS = frozenset(
+    {
+        "prepared_statement_cache_size",  # read by SQLAlchemy's asyncpg dialect
+        "statement_cache_size",
+        "command_timeout",
+        "timeout",
+        "target_session_attrs",
+        "max_cached_statement_lifetime",
+        "max_cacheable_statement_size",
+    }
+)
+
+
 def _normalize_db_url(raw: str) -> str:
     """Make a hosting provider's DATABASE_URL usable by SQLAlchemy's async engine.
 
-    Render (like Heroku) hands out `postgres://…` or `postgresql://…`, sometimes with `?sslmode=require`.
-    The async engine needs the `+asyncpg` driver, and asyncpg rejects `sslmode` as a URL parameter —
-    it would raise `TypeError: connect() got an unexpected keyword argument 'sslmode'` at startup.
+    Render and Neon hand out `postgres://…` or `postgresql://…` with libpq parameters attached.
+    Two things have to happen: switch to the `+asyncpg` driver, and drop every parameter asyncpg
+    cannot take. Dropping `sslmode`/`channel_binding` does not disable encryption — asyncpg
+    negotiates TLS on its own by default.
     """
     url = (raw or "").strip()
     if url.startswith("postgres://"):
@@ -27,7 +45,7 @@ def _normalize_db_url(raw: str) -> str:
         url = "postgresql+asyncpg://" + url[len("postgresql://") :]
     if "+asyncpg" in url:
         base, _, query = url.partition("?")
-        kept = [p for p in query.split("&") if p and not p.startswith(("sslmode=", "ssl="))]
+        kept = [p for p in query.split("&") if p.split("=", 1)[0] in _ASYNCPG_URL_PARAMS]
         # A "-pooler" host is PgBouncer in transaction mode: connections are shared between
         # transactions, so asyncpg's prepared statements break with DuplicatePreparedStatementError.
         # SQLAlchemy's asyncpg dialect reads this setting from the URL query, not from create_engine().
