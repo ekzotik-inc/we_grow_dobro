@@ -6,3 +6,5 @@ aiosqlite>=0.20
 apscheduler>=3.10,<4
 python-dotenv>=1.0
 openpyxl>=3.1
+# Windows has no system timezone database — zoneinfo needs this package there.
+tzdata>=2024.1

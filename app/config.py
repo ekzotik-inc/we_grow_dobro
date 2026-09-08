@@ -1,13 +1,16 @@
 from __future__ import annotations
 
+import logging
 import os
 from dataclasses import dataclass, field
-from datetime import date, datetime, time
-from zoneinfo import ZoneInfo
+from datetime import date, datetime, time, timezone
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from dotenv import load_dotenv
 
 load_dotenv()
+
+log = logging.getLogger(__name__)
 
 
 def _parse_ids(raw: str) -> set[int]:
@@ -59,6 +62,7 @@ class Settings:
     force_week: int = int(os.getenv("FORCE_WEEK", "0"))
 
     weeks: list[Week] = field(default_factory=list)
+    _tz: object = None
 
     def __post_init__(self) -> None:
         self.weeks = [
@@ -68,8 +72,20 @@ class Settings:
         ]
 
     @property
-    def tz(self) -> ZoneInfo:
-        return ZoneInfo(self.tz_name)
+    def tz(self):
+        """Timezone, resolved once. Windows ships no system tz database, so a missing `tzdata`
+        package would otherwise crash every menu render — fall back to UTC with a loud warning."""
+        if self._tz is None:
+            try:
+                self._tz = ZoneInfo(self.tz_name)
+            except (ZoneInfoNotFoundError, ValueError):
+                log.warning(
+                    "Не найдена таймзона %r — работаю по UTC. Установите пакет tzdata "
+                    "(pip install -r requirements.txt) или укажите корректный TZ в .env.",
+                    self.tz_name,
+                )
+                self._tz = timezone.utc
+        return self._tz
 
     def now(self) -> datetime:
         return datetime.now(self.tz)
