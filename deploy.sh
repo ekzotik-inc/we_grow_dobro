@@ -47,10 +47,16 @@ fi
 # --- 3. Версия Python ---
 PYV="$(python3 -c 'import sys; print("%d.%d" % sys.version_info[:2])')"
 say "[2/6] Python $PYV"
-python3 - <<'PY' || fail "Нужен Python 3.10 или новее. Возьмите образ Ubuntu 24.04 LTS."
-import sys
-sys.exit(0 if sys.version_info >= (3, 10) else 1)
-PY
+if ! python3 -c 'import sys; sys.exit(0 if sys.version_info >= (3, 10) else 1)'; then
+    say ""
+    say "  На сервере Python $PYV, а нужен 3.10 или новее."
+    say "  Скорее всего образ системы слишком старый:"
+    say "    Ubuntu 18 -> Python 3.6  (не подойдёт)"
+    say "    Ubuntu 20 -> Python 3.8  (не подойдёт)"
+    say "    Ubuntu 22 -> Python 3.10 (подойдёт)"
+    say ""
+    fail "Переустановите сервер с образом Ubuntu 22 и запустите deploy.sh снова."
+fi
 
 # --- 4. Связь с Telegram ---
 say "[3/6] Проверяю доступ к api.telegram.org..."
