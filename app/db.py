@@ -10,7 +10,16 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 from .config import settings
 from .models import Base, Task, TaskOption
 
-engine = create_async_engine(settings.database_url, echo=False)
+
+def _engine_kwargs() -> dict:
+    """Serverless Postgres (Neon, Supabase) suspends an idle database and drops its connections.
+    Without pre-ping the bot would hand out a dead pooled connection and fail on the next query."""
+    if settings.database_url.startswith("sqlite"):
+        return {}
+    return {"pool_pre_ping": True, "pool_recycle": 300}
+
+
+engine = create_async_engine(settings.database_url, echo=False, **_engine_kwargs())
 SessionLocal = async_sessionmaker(engine, expire_on_commit=False, class_=AsyncSession)
 
 DATA_DIR = Path(__file__).resolve().parent.parent / "data"
