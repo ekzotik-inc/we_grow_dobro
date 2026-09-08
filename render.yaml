@@ -27,6 +27,10 @@ services:
         sync: false
       - key: TZ
         value: Asia/Almaty
+      - key: PREMIUM_EMOJI   # 1 = премиум-эмодзи; нужен Telegram Premium у владельца бота
+        value: "1"
+      - key: VOICE_NAME      # имя, от которого бот говорит в цитатах
+        value: "Добрик"
       - key: FORCE_WEEK        # 1/2/3 — принудительно открыть неделю для теста, 0 — обычный режим
         value: "0"
       - key: DB_EXPIRES_AT     # с Neon оставьте пустым: база бессрочная

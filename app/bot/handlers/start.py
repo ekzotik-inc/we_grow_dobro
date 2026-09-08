@@ -22,15 +22,19 @@ async def render_menu(s, user) -> tuple[str, object]:
         # Not approved yet: no teams, no tasks — just the application status.
         return texts.pending_status(user), kb.pending_kb(user)
     my_points = await services.user_points(s, user.id)
+    rows = await services.leaderboard(s)
     team_points = None
     rank = None
     if user.team_id:
-        rows = await services.leaderboard(s)
         for i, r in enumerate(rows, 1):
             if r["team"].id == user.team_id:
                 team_points, rank = r["points"], i
     cw = settings.current_week()
-    ws = await services.week_stats_for_user(s, user.id, cw.number) if cw else None
+    ws = dict(await services.week_stats_for_user(s, user.id, cw.number)) if cw else {}
+    ws["total_teams"] = len(rows)
+    ws["approved_total"] = len(
+        [x for x in await services.user_submissions(s, user.id) if x.status.value == "approved"]
+    )
     pending = await services.pending_count(s) if user.is_admin else 0
     return texts.main_menu(user, my_points, team_points, rank, ws), kb.main_menu_kb(user, pending)
 

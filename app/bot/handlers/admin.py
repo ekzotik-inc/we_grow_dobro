@@ -53,7 +53,7 @@ async def render_admin(s):
     lines.append(f"🙋 Заявок на модерации: <b>{apps}</b>")
     lines.append(f"🔎 Отчётов на проверке: <b>{pending}</b>")
     lines.append(f"👤 Принятых участников: <b>{participants}</b>")
-    lines.append(f"🗓 Текущая неделя: <b>{cw.number if cw else '—'}</b> ({settings.marathon_status()})")
+    lines.append(f"🗓 Неделя: <b>{cw.number if cw else '—'}</b> · марафон {texts.MARATHON_STATUS_TEXT[settings.marathon_status()]}")
     lines.append("")
     lines.append(("✅" if reg_ch else "⚠️") + " Канал заявок " + (f"<code>{reg_ch}</code>" if reg_ch else "не подключён"))
     lines.append(("✅" if res_ch else "⚠️") + " Канал результатов " + (f"<code>{res_ch}</code>" if res_ch else "не подключён"))
@@ -149,15 +149,17 @@ async def cb_files(cq: CallbackQuery) -> None:
 async def _notify_user(bot, sub, approved: bool) -> None:
     if approved:
         text = (
-            f"✅ <b>Задание №{sub.task.code} «{texts.e(sub.task.title)}» зачтено!</b>\n"
-            f"Начислено <b>+{sub.points_awarded}</b> баллов в командный зачёт 🎉"
-            + (f"\n\nКомментарий P&C: <i>{texts.e(sub.review_comment)}</i>" if sub.review_comment else "")
+            f"✅ <b>{texts.e(sub.task.title)} — зачтено</b>\n"
+            f"+{sub.points_awarded} б. команде"
+            + (f"\n\n{texts.e(sub.review_comment)}" if sub.review_comment else "")
+            + "\n\n" + texts.voice(f"Спасибо за это дело {texts.plain('heart')}")
         )
     else:
         text = (
-            f"❌ <b>Задание №{sub.task.code} «{texts.e(sub.task.title)}» не зачтено.</b>\n"
-            f"Причина: <i>{texts.e(sub.review_comment or 'условия зачёта не выполнены')}</i>\n\n"
-            "Ты можешь исправить и отправить отчёт заново, пока неделя задания активна."
+            f"❌ <b>{texts.e(sub.task.title)} — пока не зачтено</b>\n"
+            f"{texts.e(sub.review_comment or 'условия зачёта выполнены не полностью')}\n\n"
+            + texts.voice("Ничего страшного — доснимай, что просят, и отправляй снова. "
+                          "Пока неделя идёт, попыток сколько угодно.")
         )
     try:
         await bot.send_message(sub.user.tg_id, text, reply_markup=kb.back_kb("menu", "🏠 Меню"))
@@ -183,7 +185,7 @@ async def cb_approve(cq: CallbackQuery) -> None:
         await _notify_user(cq.bot, sub, True)
         if in_channel(cq):
             # In the channel the card itself is the UI: rewrite it and drop the buttons.
-            await edit(cq, texts.submission_channel_card(sub), None)
+            await edit(cq, channels.emoji.strip(texts.submission_channel_card(sub)), None)
             sub.channel_message_id = cq.message.message_id
             await s.commit()
             await answer_cq(cq, f"Зачтено +{sub.points_awarded}")
@@ -228,7 +230,7 @@ async def _do_reject(cq_or_msg, state: FSMContext, sub_id: int, reason: str, act
         if channel_card:
             sub.channel_message_id = cq_or_msg.message.message_id
             await s.commit()
-            await edit(cq_or_msg, texts.submission_channel_card(sub), None)
+            await edit(cq_or_msg, channels.emoji.strip(texts.submission_channel_card(sub)), None)
             return
         await channels.update_submission_post(bot, s, sub)
         await s.commit()
@@ -280,7 +282,7 @@ async def cb_channel_card(cq: CallbackQuery) -> None:
         await answer_cq(cq, "Отчёт не найден", alert=True)
         return
     markup = kb.channel_review_kb(sub) if sub.status == SubmissionStatus.pending else None
-    await edit(cq, texts.submission_channel_card(sub), markup)
+    await edit(cq, channels.emoji.strip(texts.submission_channel_card(sub)), markup)
     await answer_cq(cq)
 
 
@@ -366,13 +368,13 @@ async def user_search_text(message: Message, state: FSMContext) -> None:
 async def _user_card(s, u) -> str:
     pts = await services.user_points(s, u.id)
     subs = await services.user_submissions(s, u.id)
-    lines = [f"👤 <b>{texts.e(u.display_name)}</b>" + (f" (@{texts.e(u.username)})" if u.username else ""), f"tg id: <code>{u.tg_id}</code>"]
+    lines = [f"👤 <b>{texts.e(u.display_name)}</b>" + (f" (@{texts.e(u.username)})" if u.username else ""), f"<code>{u.tg_id}</code>"]
     if u.department:
         lines.append(f"🏢 {texts.e(u.department)}")
     if u.city:
         lines.append(f"📍 {texts.e(u.city)}")
     lines.append(f"👥 Команда: {texts.e(u.team.emoji + ' ' + u.team.name) if u.team else '— (без команды)'}")
-    lines.append(f"⭐ Баллы: {pts} · статус: {u.status.value}")
+    lines.append(f"⭐ Баллы: {pts} · {texts.USER_STATUS_TEXT[u.status]}")
     if u.disqualified_reason:
         lines.append(f"🚫 Причина: {texts.e(u.disqualified_reason)}")
     lines.append("")

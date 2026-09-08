@@ -13,7 +13,7 @@ from aiogram import Bot
 from aiogram.exceptions import TelegramBadRequest
 from aiogram.types import InputMediaDocument, InputMediaPhoto, InputMediaVideo
 
-from .. import services, texts
+from .. import emoji, services, texts
 from ..models import Submission, User
 
 log = logging.getLogger(__name__)
@@ -70,7 +70,8 @@ async def post_registration(bot: Bot, s, user: User) -> None:
     """Publish an application card. Falls back to admins' DMs when no channel is bound."""
     from .. import keyboards as kb
 
-    text = texts.registration_channel_card(user)
+    # Telegram never accepts custom emoji in channels — send the plain characters there.
+    text = emoji.strip(texts.registration_channel_card(user))
     markup = kb.moderation_kb(user.id)
     chat_id = await services.get_channel_id(s, "reg_channel_id")
     if chat_id:
@@ -90,7 +91,7 @@ async def update_registration_post(bot: Bot, s, user: User) -> None:
         return
     try:
         await bot.edit_message_text(
-            texts.registration_channel_card(user),
+            emoji.strip(texts.registration_channel_card(user)),
             chat_id=chat_id,
             message_id=user.reg_message_id,
             reply_markup=None,
@@ -108,7 +109,7 @@ async def post_submission(bot: Bot, s, sub: Submission) -> None:
     """Publish the report: media first, then the review card with buttons."""
     from .. import keyboards as kb
 
-    text = texts.submission_channel_card(sub)
+    text = emoji.strip(texts.submission_channel_card(sub))
     markup = kb.channel_review_kb(sub)
     chat_id = await services.get_channel_id(s, "results_channel_id")
     if chat_id:
@@ -131,7 +132,7 @@ async def update_submission_post(bot: Bot, s, sub: Submission) -> None:
         return
     try:
         await bot.edit_message_text(
-            texts.submission_channel_card(sub),
+            emoji.strip(texts.submission_channel_card(sub)),
             chat_id=chat_id,
             message_id=sub.channel_message_id,
             reply_markup=None,

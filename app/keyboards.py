@@ -19,8 +19,8 @@ def webapp_button(text: str = "📱 Открыть приложение") -> Inl
 
 def start_kb() -> InlineKeyboardMarkup:
     kb = InlineKeyboardBuilder()
-    kb.row(_btn("📜 Правила", "rules"))
-    kb.row(_btn("✅ Зарегистрироваться", "reg:start"))
+    kb.row(_btn("🌱 Участвовать", "reg:start"))
+    kb.row(_btn("📖 Правила", "rules"))
     return kb.as_markup()
 
 
@@ -29,7 +29,7 @@ def rules_kb(registered: bool) -> InlineKeyboardMarkup:
     if registered:
         kb.row(_btn("⬅️ В меню", "menu"))
     else:
-        kb.row(_btn("✅ Зарегистрироваться", "reg:start"))
+        kb.row(_btn("🌱 Участвовать", "reg:start"))
         kb.row(_btn("⬅️ Назад", "start"))
     return kb.as_markup()
 
@@ -46,25 +46,39 @@ def reg_kb(step: str) -> InlineKeyboardMarkup:
 
 
 def main_menu_kb(user: User, pending: int = 0) -> InlineKeyboardMarkup:
+    """Main menu: the action to take right now spans the full width, everything else pairs up below."""
     kb = InlineKeyboardBuilder()
-    kb.row(_btn("📋 Задания", "tasks"), _btn("👥 Команды", "teams"))
-    kb.row(_btn("🏆 Рейтинг", "top"), _btn("📊 Мои результаты", "me"))
-    wa = webapp_button()
+    in_team = bool(user.team_id)
+    started = settings.marathon_status() == "active"
+
+    # The primary button is whatever the participant should do next.
+    if not in_team:
+        kb.row(_btn("🌱 Выбрать команду", "teams"))
+        kb.row(_btn("📋 Задания недели", "tasks"))
+    elif started:
+        kb.row(_btn("📋 Задания недели", "tasks"))
+        kb.row(_btn("🌱 Моя команда", f"team:{user.team_id}"))
+    else:
+        kb.row(_btn("🌱 Моя команда", f"team:{user.team_id}"))
+        kb.row(_btn("📋 Задания недели", "tasks"))
+
+    kb.row(_btn("⚡ Мой вклад", "me"), _btn("🏆 Рейтинг", "top"))
+    kb.row(_btn("📖 Правила", "rules"), _btn("💬 Помощь", "help"))
+    wa = webapp_button("📱 Открыть приложение")
     if wa:
         kb.row(wa)
-    kb.row(_btn("📜 Правила", "rules"), _btn("🆘 Помощь P&C", "help"))
     if user.is_admin:
-        kb.row(_btn("🛠 Панель P&C" + (f" · {pending} на проверке" if pending else ""), "adm"))
+        kb.row(_btn("🛠 Панель P&C" + (f" · {pending}" if pending else ""), "adm"))
     return kb.as_markup()
 
 
 def pending_kb(user: User) -> InlineKeyboardMarkup:
     """Menu for an applicant whose registration is not approved yet."""
     kb = InlineKeyboardBuilder()
-    kb.row(_btn("🔄 Обновить статус", "menu"))
+    kb.row(_btn("🔄 Проверить, приняли ли заявку", "menu"))
     if user.status.value == "rejected":
         kb.row(_btn("📝 Заполнить анкету заново", "reg:start"))
-    kb.row(_btn("📜 Правила", "rules"), _btn("🆘 Помощь P&C", "help"))
+    kb.row(_btn("📖 Правила", "rules"), _btn("💬 Помощь", "help"))
     return kb.as_markup()
 
 
@@ -74,7 +88,7 @@ def back_kb(cb: str = "menu", text: str = "⬅️ В меню") -> InlineKeyboar
 
 def help_kb() -> InlineKeyboardMarkup:
     kb = InlineKeyboardBuilder()
-    kb.row(_btn("👥 Попросить распределить меня в команду", "help:team"))
+    kb.row(_btn("🌱 Помогите выбрать команду", "help:team"))
     kb.row(_btn("❓ Другой вопрос", "help:other"))
     kb.row(_btn("⬅️ В меню", "menu"))
     return kb.as_markup()
@@ -131,13 +145,13 @@ def cancel_kb(cb: str = "teams") -> InlineKeyboardMarkup:
 
 def week_tabs_kb(active: int, tasks: list[Task], subs: dict[int, Submission]) -> InlineKeyboardMarkup:
     kb = InlineKeyboardBuilder()
-    kb.row(*[_btn(("• " if w.number == active else "") + f"{w.number} нед.", f"tasks:w:{w.number}") for w in settings.weeks])
+    kb.row(*[_btn(("• " if w.number == active else "") + f"Неделя {w.number}", f"tasks:w:{w.number}") for w in settings.weeks])
     for t in tasks:
         sub = subs.get(t.id)
         icon = ""
         if sub and sub.status != SubmissionStatus.cancelled:
             icon = {"draft": "📝", "pending": "⏳", "approved": "✅", "rejected": "❌"}[sub.status.value] + " "
-        kb.row(_btn(f"{icon}{t.emoji} №{t.code} {t.title[:34]} · {t.points_label}", f"task:{t.id}"))
+        kb.row(_btn(f"{icon}{t.emoji} {t.title[:36]} · {t.points_label} б.", f"task:{t.id}"))
     kb.row(_btn("⬅️ В меню", "menu"))
     return kb.as_markup()
 
@@ -151,9 +165,9 @@ def task_card_kb(task: Task, sub: Submission | None, is_open: bool, user: User) 
     elif can_start:
         if task.options:
             for o in task.options:
-                kb.row(_btn(f"▸ {o.title} — {o.points} б.", f"sub:start:{task.id}:{o.id}"))
+                kb.row(_btn(f"{o.title} — {o.points} б.", f"sub:start:{task.id}:{o.id}"))
         else:
-            kb.row(_btn("📤 Выполнить и отправить отчёт", f"sub:start:{task.id}:0"))
+            kb.row(_btn("📤 Сделать и отправить отчёт", f"sub:start:{task.id}:0"))
     if sub and sub.status == SubmissionStatus.pending:
         kb.row(_btn("🚫 Отозвать отчёт", f"sub:cancel:{sub.id}"))
     kb.row(_btn("⬅️ К заданиям", f"tasks:w:{task.week}"))

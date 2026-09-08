@@ -14,6 +14,7 @@ from aiogram.fsm.storage.memory import MemoryStorage
 from aiogram.types import BotCommand, MenuButtonWebApp, WebAppInfo
 
 from .bot.handlers import setup_routers
+from .bot.middlewares import premium_emoji_guard
 from .config import settings
 from .db import init_db
 from .scheduler import build_scheduler
@@ -48,6 +49,7 @@ async def run() -> None:
     await init_db()
 
     bot = Bot(settings.bot_token, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
+    bot.session.middleware(premium_emoji_guard)
     dp = Dispatcher(storage=MemoryStorage())
     dp.include_router(setup_routers())
     scheduler = None

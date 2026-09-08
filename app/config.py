@@ -116,6 +116,10 @@ class Settings:
     external_url: str = os.getenv("RENDER_EXTERNAL_URL", "").strip().rstrip("/")
     # Date the hosted database is deleted (free Render Postgres lives 30 days). Empty = no deadline.
     db_expires_at: str = os.getenv("DB_EXPIRES_AT", "").strip()
+    # Custom (premium) emoji work only while the bot owner has Telegram Premium; 0 turns them off.
+    premium_emoji: bool = os.getenv("PREMIUM_EMOJI", "1").strip() not in ("0", "false", "no", "")
+    # Name the bot speaks under in its quoted lines.
+    voice_name: str = os.getenv("VOICE_NAME", "Добрик").strip()
 
     weeks: list[Week] = field(default_factory=list)
     _tz: object = None

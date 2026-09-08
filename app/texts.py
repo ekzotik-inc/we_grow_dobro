@@ -4,6 +4,8 @@ from __future__ import annotations
 from html import escape
 
 from .config import settings
+from .emoji import e as px
+from .emoji import plain
 from .models import Submission, SubmissionStatus, Task, Team, User, UserStatus
 
 STATUS_ICON = {
@@ -17,9 +19,36 @@ STATUS_LABEL = {
     SubmissionStatus.draft: "черновик",
     SubmissionStatus.pending: "на проверке",
     SubmissionStatus.approved: "зачтено",
-    SubmissionStatus.rejected: "отклонено",
+    SubmissionStatus.rejected: "не зачтено",
     SubmissionStatus.cancelled: "отменено",
 }
+
+# Human wording for participant statuses — the raw enum values must never reach a message.
+USER_STATUS_TEXT = {
+    UserStatus.new: "не заполнил анкету",
+    UserStatus.pending: "ждёт решения",
+    UserStatus.registered: "участвует",
+    UserStatus.rejected: "заявка отклонена",
+    UserStatus.disqualified: "дисквалифицирован",
+}
+MARATHON_STATUS_TEXT = {"before": "ещё не начался", "active": "идёт", "after": "завершён"}
+
+
+def voice(line: str) -> str:
+    """A line spoken by the bot's character, set apart from the data above it."""
+    return f"{px('hug')} <b>{e(settings.voice_name)}</b>\n<blockquote>{line}</blockquote>"
+
+
+def plural(n: int, one: str, few: str, many: str) -> str:
+    """Russian noun agreement: 1 задание, 2 задания, 5 заданий."""
+    if 11 <= n % 100 <= 14:
+        return many
+    last = n % 10
+    if last == 1:
+        return one
+    if 2 <= last <= 4:
+        return few
+    return many
 
 
 def e(text: str | None) -> str:
@@ -44,13 +73,14 @@ RULES = f"""<b>📜 Правила марафона</b>
 
 
 def welcome(user: User) -> str:
+    first = (user.full_name or "").split()[0] if user.full_name else ""
+    hello = f"Привет, {e(first)}!" if first else "Привет!"
     return (
-        f"<b>🌱 {e(settings.marathon_title)}</b>\n\n"
-        "Привет! Это бот марафона добрых дел. Здесь ты:\n"
-        "• зарегистрируешься и вступишь в команду,\n"
-        "• увидишь задания недели и отправишь отчёты,\n"
-        "• будешь следить за баллами команды.\n\n"
-        "Перед регистрацией ознакомься с правилами 👇"
+        f"{px('heart')} <b>{e(settings.marathon_title)}</b>\n\n"
+        f"{hello} Три недели мы вместе делаем добрые дела — по-настоящему, "
+        "а не для галочки. Каждую неделю четыре задания на выбор, команда из "
+        f"{settings.team_size} человек и общий зачёт.\n\n"
+        f"{voice('Загляни в правила — там всё честно и коротко. Потом жми «Участвовать», и начнём ' + plain('rocket'))}"
     )
 
 
@@ -72,135 +102,235 @@ def registration_step(step: str, draft: dict) -> str:
     return head + done + prompts[step]
 
 
+MONTHS = ["января", "февраля", "марта", "апреля", "мая", "июня",
+          "июля", "августа", "сентября", "октября", "ноября", "декабря"]
+
+
+def _date_ru(d) -> str:
+    return f"{d.day} {MONTHS[d.month - 1]}"
+
+
 def main_menu(user: User, my_points: int, team_points: int | None, team_rank: int | None, week_stats: dict | None) -> str:
     cw = settings.current_week()
     status = settings.marathon_status()
-    lines = [f"<b>🌱 {e(settings.marathon_title)}</b>", ""]
-    lines.append(f"👤 <b>{e(user.display_name)}</b>" + (f" · {e(user.department)}" if user.department else ""))
+    total_teams = week_stats.get("total_teams") if week_stats else None
+
+    lines = [f"{px('heart')} <b>{e(user.display_name)}</b>"]
+    if user.department:
+        lines.append(f"<i>{e(user.department)}</i>")
+
     if user.team:
-        rank = f" · {team_rank} место" if team_rank else ""
-        lines.append(f"👥 Команда: <b>{e(user.team.emoji)} {e(user.team.name)}</b> — {team_points or 0} баллов{rank}")
+        place = f" · {px('medal')} {team_rank} место из {total_teams}" if team_rank and total_teams else ""
+        lines.append(f"🌱 Команда: <b>{e(user.team.emoji)} {e(user.team.name)}</b>{place}")
+        lines.append(f"{px('bolt')} Баллы команды: <b>{team_points or 0}</b>")
     else:
-        lines.append("👥 Команда: <i>не выбрана</i> ⚠️")
-    lines.append(f"⭐ Мои баллы: <b>{my_points}</b>")
+        lines.append("🌱 Команда: пока не выбрана")
+
+    approved = (week_stats or {}).get("approved_total", 0)
+    lines.append(
+        f"⭐ Мой вклад: <b>{my_points}</b> · "
+        f"{approved} {plural(approved, 'задание', 'задания', 'заданий')} зачтено"
+    )
+
+    if user.status == UserStatus.disqualified:
+        lines.append("")
+        lines.append(f"{px('blocked')} Твои результаты сняты с командного зачёта. Вопросы — к сотруднику P&C.")
+        return "\n".join(lines)
+
     lines.append("")
     if status == "before":
-        lines.append(f"🗓 Марафон стартует <b>{settings.weeks[0].start.strftime('%d.%m')}</b>. Успей собрать команду!")
-    elif status == "after":
-        lines.append("🏁 Марафон завершён. Спасибо за участие!")
-    elif cw:
-        ws = week_stats or {}
-        lines.append(
-            f"🗓 Сейчас <b>{cw.number} неделя</b> ({cw.label}). "
-            f"Отправлено заданий: <b>{ws.get('submitted', 0)}/4</b>, зачтено: <b>{ws.get('approved', 0)}</b>."
-        )
-        if ws.get("submitted", 0) == 0:
-            lines.append("❗ Минимум 1 задание в неделю — не забудь отправить отчёт.")
-    if user.status.value == "disqualified":
-        lines.append("\n🚫 <b>Вы дисквалифицированы.</b> Ваши результаты не учитываются в командном зачёте.")
+        start = settings.weeks[0].start
+        lines.append(f"🗓 Старт {_date_ru(start)}")
+        if user.team:
+            line = "Команда есть, правила знаешь — ждём старта. Осталось совсем немного!"
+        else:
+            line = "Успей выбрать команду до старта — без неё задания не открыть."
+        lines.append("")
+        lines.append(voice(line))
+        return "\n".join(lines)
+
+    if status == "after":
+        lines.append("🏁 Марафон завершён")
+        lines.append("")
+        lines.append(voice(f"Спасибо, что дошёл до конца. Это были славные три недели {plain('heart')}"))
+        return "\n".join(lines)
+
+    ws = week_stats or {}
+    sent, ok = ws.get("submitted", 0), ws.get("approved", 0)
+    deadline = settings.week_deadline(cw.number)
+    lines.append(f"🗓 Неделя {cw.number} · до {_date_ru(deadline.date())}")
+    lines.append(f"📋 Сдано {sent} из 4 · зачтено {ok}")
+    lines.append("")
+
+    if not user.team:
+        line = "Сначала выбери команду — задания открываются только участникам команд."
+    elif sent == 0:
+        line = "На этой неделе ещё ни одного дела. Загляни в задания — там есть простые, на десять минут."
+    elif sent >= 4:
+        line = f"Все четыре задания сданы. Это максимум за неделю, снимаю шляпу {plain('cool')}"
+    else:
+        left = 4 - sent
+        line = f"Хороший темп! Можно взять ещё {left} {plural(left, 'задание', 'задания', 'заданий')} на этой неделе."
+    lines.append(voice(line))
     return "\n".join(lines)
 
 
 def teams_list(teams: list[dict], user: User) -> str:
-    lines = ["<b>👥 Команды</b>", ""]
+    lines = ["<b>🌱 Команды марафона</b>", ""]
     if not teams:
-        lines.append("Пока нет ни одной команды. Создай первую!")
-    for i, row in enumerate(teams, 1):
+        lines.append("Пока пусто — твоя команда может стать первой.")
+    for row in teams:
         t: Team = row["team"]
         n = len(row["members"])
-        full = " (заполнена)" if n >= settings.team_size else ""
-        mine = " ← ваша" if user.team_id == t.id else ""
-        lines.append(f"{i}. {e(t.emoji)} <b>{e(t.name)}</b> — {n}/{settings.team_size}{full} · {row['points']} б.{mine}")
+        free = settings.team_size - n
+        mark = " ← ты здесь" if user.team_id == t.id else ("" if free > 0 else " · мест нет")
+        lines.append(f"{e(t.emoji)} <b>{e(t.name)}</b> — {n} из {settings.team_size} · {row['points']} б.{mark}")
     lines.append("")
     if user.team_id:
-        lines.append("Открой команду, чтобы посмотреть состав.")
+        lines.append(voice("Открой любую команду, чтобы посмотреть состав и счёт."))
     else:
-        lines.append(f"Выбери команду, в которой есть место, или создай свою. Не можешь выбрать — напиши {e(settings.pc_contact)} через кнопку «Помощь P&C».")
+        lines.append(voice(
+            "Выбирай команду, где есть места, или собери свою. Если сложно определиться — "
+            f"нажми «Помощь», и {e(settings.pc_contact)} подберёт команду за тебя."
+        ))
     return "\n".join(lines)
 
 
 def team_card(team: Team, members: list[User], points: int, rank: int | None, user_pts: dict[int, int], viewer: User) -> str:
     lines = [f"<b>{e(team.emoji)} {e(team.name)}</b>", ""]
-    lines.append(f"⭐ Баллы команды: <b>{points}</b>" + (f" · {rank} место" if rank else ""))
-    lines.append(f"👥 Состав ({len(members)}/{settings.team_size}):")
-    for m in members:
+    lines.append(f"{px('bolt')} <b>{points}</b> баллов" + (f" · {px('medal')} {rank} место" if rank else ""))
+    lines.append("")
+    for m in sorted(members, key=lambda x: -user_pts.get(x.id, 0)):
         cap = " 👑" if team.captain_id == m.id else ""
-        lines.append(f"  • {e(m.display_name)}{cap} — {user_pts.get(m.id, 0)} б.")
+        you = " (это ты)" if m.id == viewer.id else ""
+        lines.append(f"· {e(m.display_name)}{cap}{you} — {user_pts.get(m.id, 0)} б.")
     free = settings.team_size - len(members)
+    lines.append("")
     if free > 0:
-        lines.append(f"\nСвободных мест: {free}")
+        lines.append(f"Свободных мест: {free} из {settings.team_size}")
+    else:
+        lines.append("Команда в полном составе")
     return "\n".join(lines)
 
 
 def leaderboard_text(rows: list[dict]) -> str:
-    lines = ["<b>🏆 Рейтинг команд</b>", ""]
-    medals = ["🥇", "🥈", "🥉"]
+    lines = ["🏆 <b>Рейтинг команд</b>", ""]
+    medals = [px("medal"), "🥈", "🥉"]
     if not rows:
-        lines.append("Команд пока нет.")
+        lines.append("Счёт пока не открыт — всё впереди.")
     for i, r in enumerate(rows):
         t: Team = r["team"]
-        medal = medals[i] if i < 3 else f"{i + 1}."
-        lines.append(f"{medal} {e(t.emoji)} <b>{e(t.name)}</b> — <b>{r['points']}</b> б. ({len(r['members'])} чел.)")
+        mark = medals[i] if i < 3 else f"{i + 1}."
+        lines.append(f"{mark} {e(t.emoji)} <b>{e(t.name)}</b> — {r['points']} б.")
+    if rows:
+        lines.append("")
+        top = rows[0]
+        if len(rows) == 1:
+            lines.append(voice("Пока в марафоне одна команда. Позовите коллег — вместе интереснее."))
+        elif top["points"] > rows[1]["points"]:
+            gap = top["points"] - rows[1]["points"]
+            lines.append(voice(f"Впереди «{e(top['team'].name)}» с отрывом в {gap} б. Догнать вполне реально."))
+        else:
+            lines.append(voice("Идёте вровень — каждое дело может перевернуть таблицу."))
     return "\n".join(lines)
 
 
 def tasks_list(week: int, tasks: list[Task], subs: dict[int, Submission]) -> str:
-    w = settings.week(week)
     cw = settings.current_week()
-    lines = [f"<b>📋 Задания — {week} неделя</b> ({w.label if w else ''})", ""]
-    if cw and cw.number == week:
-        lines.append("🟢 Неделя активна: отчёты принимаются до " + settings.week_deadline(week).strftime("%d.%m %H:%M"))
-    elif cw and cw.number > week or settings.marathon_status() == "after":
-        lines.append("⚪ Неделя завершена, отчёты не принимаются.")
+    is_now = bool(cw and cw.number == week)
+    is_past = bool(cw and cw.number > week) or settings.marathon_status() == "after"
+
+    lines = [f"<b>📋 Неделя {week}</b>"]
+    if is_now:
+        lines.append(f"Принимаем до {_date_ru(settings.week_deadline(week).date())}")
+    elif is_past:
+        lines.append("Неделя закрыта")
     else:
-        lines.append("🔒 Задания откроются в свою неделю.")
+        lines.append("Откроется в свой срок")
     lines.append("")
-    for t in tasks:
-        sub = subs.get(t.id)
-        st = f" {STATUS_ICON[sub.status]} {STATUS_LABEL[sub.status]}" if sub and sub.status != SubmissionStatus.cancelled else ""
-        lines.append(f"{e(t.emoji)} <b>№{t.code}. {e(t.title)}</b> — {t.points_label} б.{st}")
-    lines.append("\nМинимум 1 задание в неделю, максимум 4. Открой задание, чтобы прочитать условия зачёта.")
+
+    for task in tasks:
+        sub = subs.get(task.id)
+        mark = ""
+        if sub and sub.status != SubmissionStatus.cancelled:
+            mark = f" · {STATUS_ICON[sub.status]} {STATUS_LABEL[sub.status]}"
+        lines.append(f"{e(task.emoji)} <b>{e(task.title)}</b>")
+        lines.append(f"    {task.points_label} б.{mark}")
+
+    lines.append("")
+    if is_now:
+        done = len([s for s in subs.values() if s.week == week and s.status in (SubmissionStatus.pending, SubmissionStatus.approved)])
+        if done == 0:
+            lines.append(voice("Возьми хотя бы одно — этого уже достаточно, чтобы неделя засчиталась."))
+        elif done >= 4:
+            lines.append(voice(f"Четыре из четырёх. Больше на этой неделе не нужно {plain('cool')}"))
+        else:
+            lines.append(voice("Открой задание, чтобы посмотреть, что нужно приложить к отчёту."))
     return "\n".join(lines)
 
 
 def task_card(task: Task, sub: Submission | None) -> str:
-    lines = [f"{e(task.emoji)} <b>Задание №{task.code}. {e(task.title)}</b>", f"🗓 {task.week} неделя · ⭐ {task.points_label} баллов", ""]
+    lines = [f"{e(task.emoji)} <b>{e(task.title)}</b>", f"{px('bolt')} {task.points_label} б. · неделя {task.week}", ""]
     lines.append(e(task.description))
     lines.append("")
-    lines.append("<b>Условия зачёта:</b>")
+    lines.append("<b>Что приложить к отчёту</b>")
     lines.append(e(task.conditions))
     if task.options:
+        lines.append("")
+        lines.append("<b>Выбери один вариант — оба сделать нельзя</b>")
         for o in task.options:
-            lines.append(f"\n<b>▸ {e(o.title)} — {o.points} б.</b>\n{e(o.conditions)}")
+            lines.append(f"\n<b>{e(o.title)} — {o.points} б.</b>\n{e(o.conditions)}")
     if sub and sub.status != SubmissionStatus.cancelled:
         lines.append("")
-        opt = f" (опция: {e(sub.option.title)})" if sub.option else ""
-        lines.append(f"{STATUS_ICON[sub.status]} Статус: <b>{STATUS_LABEL[sub.status]}</b>{opt}")
+        opt = f" · {e(sub.option.title)}" if sub.option else ""
+        lines.append(f"{STATUS_ICON[sub.status]} {STATUS_LABEL[sub.status].capitalize()}{opt}")
         if sub.status == SubmissionStatus.approved:
-            lines.append(f"Начислено: <b>{sub.points_awarded}</b> б.")
-        if sub.status == SubmissionStatus.rejected and sub.review_comment:
-            lines.append(f"Комментарий P&C: <i>{e(sub.review_comment)}</i>")
+            lines.append(voice(f"Зачтено, {sub.points_awarded} б. ушли команде. Спасибо {plain('heart')}"))
+        elif sub.status == SubmissionStatus.rejected and sub.review_comment:
+            lines.append(f"Причина: <i>{e(sub.review_comment)}</i>")
+            lines.append(voice("Это поправимо — доснимай, что просят, и отправляй снова."))
+        elif sub.status == SubmissionStatus.pending:
+            lines.append(voice("Отчёт у сотрудника P&C. Как проверят — сразу напишу."))
     return "\n".join(lines)
 
 
 def submission_editor(sub: Submission) -> str:
     task = sub.task
     files = len(sub.files or [])
-    lines = [f"📤 <b>Отчёт: №{task.code}. {e(task.title)}</b>"]
+    need = sub.required_photos
+
+    lines = [f"📤 <b>{e(task.title)}</b>"]
     if sub.option:
-        lines.append(f"Опция: <b>{e(sub.option.title)}</b> — {sub.option.points} б.")
+        lines.append(f"Вариант: {e(sub.option.title)} — {sub.option.points} б.")
     lines.append("")
-    lines.append("<b>Что нужно:</b>")
+    lines.append("<b>Что приложить</b>")
     lines.append(e(sub.option.conditions if sub.option else task.conditions))
     lines.append("")
-    ok_f = "✅" if files >= sub.required_photos else "◻️"
-    lines.append(f"{ok_f} Файлы: <b>{files}</b> (нужно минимум {sub.required_photos}) — просто отправь фото/файлы в чат")
-    if task.note_required:
-        ok_n = "✅" if sub.note else "◻️"
-        lines.append(f"{ok_n} Заметка: " + (f"<i>{e(sub.note[:200])}</i>" if sub.note else "отправь текст сообщением"))
+
+    ok_f = "✅" if files >= need else "◻️"
+    if files >= need:
+        lines.append(f"{ok_f} Фото и файлы: {files} — достаточно")
     else:
-        lines.append("◻️ Заметка (необязательно): " + (f"<i>{e(sub.note[:200])}</i>" if sub.note else "можно отправить текстом"))
-    lines.append("\nКогда всё готово — нажми «Отправить на проверку».")
+        lines.append(f"{ok_f} Фото и файлы: {files} из {need} — просто пришли их сюда")
+
+    note_mark = "✅" if sub.note else ("◻️" if task.note_required else "○")
+    if sub.note:
+        lines.append(f"{note_mark} Заметка: <i>{e(sub.note[:180])}</i>")
+    elif task.note_required:
+        lines.append(f"{note_mark} Заметка: напиши пару строк сообщением")
+    else:
+        lines.append(f"{note_mark} Заметка: по желанию")
+
+    lines.append("")
+    missing = []
+    if files < need:
+        missing.append(f"{need - files} {plural(need - files, 'файл', 'файла', 'файлов')}")
+    if task.note_required and not sub.note:
+        missing.append("заметку")
+    if missing:
+        lines.append(voice("Осталось добавить " + " и ".join(missing) + " — и можно отправлять."))
+    else:
+        lines.append(voice(f"Всё на месте. Жми «Отправить на проверку» {plain('rocket')}"))
     return "\n".join(lines)
 
 
@@ -225,40 +355,52 @@ def submission_admin_card(sub: Submission, idx: int | None = None, total: int | 
 
 
 def my_results(user: User, subs: list[Submission], total: int) -> str:
-    lines = [f"<b>📊 Мои результаты</b> — {total} б.", ""]
+    done = len([x for x in subs if x.status == SubmissionStatus.approved])
+    lines = [f"{px('bolt')} <b>Мой вклад: {total} б.</b>",
+             f"{done} {plural(done, 'доброе дело', 'добрых дела', 'добрых дел')} зачтено", ""]
     for w in settings.weeks:
         ws = [x for x in subs if x.week == w.number and x.status != SubmissionStatus.cancelled]
-        lines.append(f"<b>{w.number} неделя</b> ({w.label})")
+        lines.append(f"<b>Неделя {w.number}</b>")
         if not ws:
-            lines.append("  — отчётов нет")
+            lines.append("    пусто")
         for x in ws:
             pts = f" +{x.points_awarded}" if x.status == SubmissionStatus.approved else ""
-            lines.append(f"  {STATUS_ICON[x.status]} №{x.task.code} {e(x.task.title)} — {STATUS_LABEL[x.status]}{pts}")
+            lines.append(f"    {STATUS_ICON[x.status]} {e(x.task.title)}{pts}")
         lines.append("")
+    if total == 0:
+        lines.append(voice("Пока чисто — но это легко исправить одним делом на десять минут."))
+    else:
+        lines.append(voice(f"Каждый твой балл ушёл команде. Так держать {plain('heart')}"))
     return "\n".join(lines).rstrip()
 
 
 def week_announce(week: int, tasks: list[Task]) -> str:
-    w = settings.week(week)
-    lines = [f"📌 <b>Неделя {week}</b> ({w.label if w else ''})", ""]
     intro = {
-        1: "🚀 Добрые дела начинаются! На этой неделе тебя ждут 4 задания:",
-        2: "✨ Вторая неделя марафона = новые добрые поступки! Что попробуешь на этот раз?",
-        3: "🔥 Финальная неделя — время для новой порции вдохновения! Тебя ждут задания:",
-    }.get(week, "Новые задания недели:")
-    lines.append(intro)
-    for t in tasks:
-        lines.append(f"{e(t.emoji)} №{t.code}. {e(t.title)} — {t.points_label} б.")
+        1: f"{px('rocket')} <b>Марафон начался!</b>",
+        2: f"{px('star_eyes')} <b>Вторая неделя открыта</b>",
+        3: f"{px('bolt')} <b>Финальная неделя</b>",
+    }.get(week, f"<b>Неделя {week}</b>")
+    lines = [intro, "", "Четыре дела на выбор:"]
+    for task in tasks:
+        lines.append(f"{e(task.emoji)} {e(task.title)} — {task.points_label} б.")
     lines.append("")
-    lines.append(f"Отчёты принимаются до <b>{settings.week_deadline(week).strftime('%d.%m %H:%M')}</b>. Минимум 1 задание в неделю! Открой «Задания» в меню 👇")
+    lines.append(f"Успеть можно до {_date_ru(settings.week_deadline(week).date())}.")
+    lines.append("")
+    closing = {
+        1: "Начни с любого — важно просто начать.",
+        2: "Первая неделя позади. Вторая обычно даётся легче.",
+        3: "Последний рывок. Ещё есть время подтянуть команду в таблице.",
+    }.get(week, "Открывай «Задания» и выбирай.")
+    lines.append(voice(closing))
     return "\n".join(lines)
 
 
 def week_reminder(week: int) -> str:
     return (
-        f"⏰ <b>Напоминание</b>\n\nНеделя {week} заканчивается <b>{settings.week_deadline(week).strftime('%d.%m %H:%M')}</b>, "
-        "а у тебя ещё нет отправленных отчётов. По правилам нужно выполнить минимум 1 задание в неделю. "
-        "Открой «Задания» и отправь отчёт 💪"
+        f"⏰ <b>Неделя {week} заканчивается завтра</b>\n\n"
+        "У тебя пока нет ни одного отправленного дела на этой неделе.\n\n"
+        + voice("Есть задания на десять минут — угостить коллегу кофе, написать благодарность. "
+                f"Успеть реально прямо сегодня {plain('hug')}")
     )
 
 
@@ -336,16 +478,18 @@ def pending_status(user: User) -> str:
     """What a not-yet-approved participant sees instead of the main menu."""
     if user.status == UserStatus.pending:
         return (
-            "⏳ <b>Заявка на модерации</b>\n\n"
-            f"👤 {e(user.display_name)}"
+            f"{px('thinking')} <b>Анкета отправлена</b>\n\n"
+            f"{e(user.display_name)}"
             + (f" · {e(user.department)}" if user.department else "")
-            + "\n\nСотрудник P&C проверит заявку и подтвердит участие. "
-            "Как только заявку примут, тебе придёт уведомление в этот чат, и откроются команды и задания."
+            + "\n\n"
+            + voice(f"Заявку посмотрит {e(settings.pc_contact)} и подтвердит участие. "
+                    "Как только это случится — напишу сюда, и откроются команды и задания.")
         )
     return (
-        "❌ <b>Заявка отклонена</b>\n\n"
+        f"{px('blocked')} <b>Заявка отклонена</b>\n\n"
         f"Причина: <i>{e(user.reject_reason or 'не указана')}</i>\n\n"
-        f"Если это ошибка — напиши {e(settings.pc_contact)} через кнопку «Помощь P&C»."
+        + voice("Если это недоразумение — напиши сотруднику P&C, разберёмся. "
+                "Или заполни анкету заново, если что-то было указано неверно.")
     )
 
 

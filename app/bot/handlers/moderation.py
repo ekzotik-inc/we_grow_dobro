@@ -49,7 +49,7 @@ async def _refresh_card(cq: CallbackQuery, user) -> None:
     """Redraw the application card under the pressed button."""
     in_channel = _in_channel(cq)
     markup = kb.moderation_kb(user.id) if user.status == UserStatus.pending else (None if in_channel else kb.admin_user_kb(user))
-    await edit(cq, texts.registration_channel_card(user), markup)
+    await edit(cq, channels.emoji.strip(texts.registration_channel_card(user)), markup)
 
 
 @router.callback_query(F.data.regexp(r"^mod:card:(\d+)$"))
@@ -174,7 +174,7 @@ async def mod_reject_text(message: Message, state: FSMContext) -> None:
     await state.clear()
     if user is None:
         return
-    await edit_anchor(message.bot, message.chat.id, state, texts.registration_channel_card(user), kb.admin_user_kb(user))
+    await edit_anchor(message.bot, message.chat.id, state, channels.emoji.strip(texts.registration_channel_card(user)), kb.admin_user_kb(user))
 
 
 @router.message(Command("start"), F.text.startswith("/start modrej_"))
