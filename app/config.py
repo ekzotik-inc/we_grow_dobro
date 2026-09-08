@@ -25,9 +25,14 @@ def _normalize_db_url(raw: str) -> str:
         url = "postgresql+asyncpg://" + url[len("postgres://") :]
     elif url.startswith("postgresql://"):
         url = "postgresql+asyncpg://" + url[len("postgresql://") :]
-    if "+asyncpg" in url and "?" in url:
+    if "+asyncpg" in url:
         base, _, query = url.partition("?")
         kept = [p for p in query.split("&") if p and not p.startswith(("sslmode=", "ssl="))]
+        # A "-pooler" host is PgBouncer in transaction mode: connections are shared between
+        # transactions, so asyncpg's prepared statements break with DuplicatePreparedStatementError.
+        # SQLAlchemy's asyncpg dialect reads this setting from the URL query, not from create_engine().
+        if "-pooler." in base and not any(p.startswith("prepared_statement_cache_size=") for p in kept):
+            kept.append("prepared_statement_cache_size=0")
         url = base + ("?" + "&".join(kept) if kept else "")
     return url
 

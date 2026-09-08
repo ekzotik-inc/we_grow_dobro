@@ -86,9 +86,12 @@ Render сам забирает код из GitHub, а при каждом `git p
 
 1. Зайдите на [neon.tech](https://neon.tech), войдите через GitHub.
 2. **Create project** — название любое, регион выберите поближе (Europe / Frankfurt).
-3. На экране после создания скопируйте **Connection string** — строку вида
-   `postgresql://user:пароль@ep-xxx.eu-central-1.aws.neon.tech/neondb?sslmode=require`.
-   Копируйте целиком, вместе с `?sslmode=require` — бот сам приведёт её к нужному виду.
+3. Нажмите зелёную кнопку **Connect** слева вверху (или карточку «Connection string»).
+4. Скопируйте строку целиком, вместе с хвостом `?sslmode=require` — бот сам приведёт её к нужному виду:
+   `postgresql://neondb_owner:пароль@ep-xxx.eu-central-1.aws.neon.tech/neondb?sslmode=require`
+
+   Подойдёт любой из двух вариантов, которые предлагает Neon — и прямое подключение,
+   и режим с пулом (в адресе будет `-pooler`): бот распознаёт оба и настраивается сам.
 
 ### Шаг 2. Бот и сервис
 

@@ -12,11 +12,22 @@ from .models import Base, Task, TaskOption
 
 
 def _engine_kwargs() -> dict:
-    """Serverless Postgres (Neon, Supabase) suspends an idle database and drops its connections.
-    Without pre-ping the bot would hand out a dead pooled connection and fail on the next query."""
+    """Tuning for hosted Postgres. SQLite needs none of it.
+
+    - pre-ping/recycle: serverless Postgres (Neon, Supabase) suspends an idle database and drops its
+      connections; without pre-ping the bot hands out a dead pooled connection and fails on the next query.
+    - statement caches: a "-pooler" host is PgBouncer in transaction mode, where connections are shared
+      between transactions. asyncpg's prepared statements do not survive that and raise
+      DuplicatePreparedStatementError, so both caches have to be off.
+    """
     if settings.database_url.startswith("sqlite"):
         return {}
-    return {"pool_pre_ping": True, "pool_recycle": 300}
+    kwargs: dict = {"pool_pre_ping": True, "pool_recycle": 300}
+    if "-pooler." in settings.database_url:
+        # The matching prepared_statement_cache_size=0 is added to the URL in config._normalize_db_url,
+        # because SQLAlchemy's asyncpg dialect only reads that one from the URL query.
+        kwargs["connect_args"] = {"statement_cache_size": 0}
+    return kwargs
 
 
 engine = create_async_engine(settings.database_url, echo=False, **_engine_kwargs())
