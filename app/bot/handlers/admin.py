@@ -59,6 +59,9 @@ async def render_admin(s):
     lines.append(("✅" if res_ch else "⚠️") + " Канал результатов " + (f"<code>{res_ch}</code>" if res_ch else "не подключён"))
     if not (reg_ch and res_ch):
         lines.append("\nБез канала карточки приходят всем P&C в личку. Подключить: «Каналы и настройки».")
+    warning = texts.db_expiry_warning()
+    if warning:
+        lines.append("\n" + warning)
     return "\n".join(lines), kb.admin_menu_kb(pending, apps)
 
 

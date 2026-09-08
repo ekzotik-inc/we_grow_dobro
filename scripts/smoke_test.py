@@ -21,9 +21,9 @@ from fastapi.testclient import TestClient  # noqa: E402
 
 from app import services  # noqa: E402
 from app.config import settings  # noqa: E402
-from app.db import SessionLocal, init_db  # noqa: E402
+from app.db import SessionLocal, engine, init_db  # noqa: E402
 from app.export import export_xlsx  # noqa: E402
-from app.models import SubmissionStatus, UserStatus  # noqa: E402
+from app.models import Base, SubmissionStatus, UserStatus  # noqa: E402
 from app.web.api import app  # noqa: E402
 
 
@@ -35,10 +35,20 @@ def init_data_for(user: dict) -> str:
     return urlencode(pairs)
 
 
+async def reset_schema() -> None:
+    """Start from an empty database on any backend: deleting a file only works for SQLite."""
+    if settings.database_url.startswith("sqlite"):
+        path = settings.database_url.split("///")[-1]
+        if path and path != ":memory:" and os.path.exists(path):
+            os.remove(path)
+        return
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.drop_all)
+
+
 async def main() -> None:
-    db = settings.database_url.split("///")[-1]
-    if os.path.exists(db):
-        os.remove(db)
+    print("backend:", settings.database_url.split("://")[0])
+    await reset_schema()
     await init_db()
     async with SessionLocal() as s:
         tasks = await services.list_tasks(s)
@@ -214,6 +224,10 @@ async def main() -> None:
         print("segments ok:", {c: len(await services.segment_users(s, c)) for c, _, _ in services.SEGMENTS if c not in ("lt_n_week", "team")})
         await export_xlsx(s, __import__("pathlib").Path("data/smoke_export.xlsx"))
         print("export ok")
+
+    # The TestClient runs the app in its own event loop, and asyncpg connections belong to the loop that
+    # opened them — release the pool so the client opens fresh ones.
+    await engine.dispose()
 
     # Web App API
     client = TestClient(app)

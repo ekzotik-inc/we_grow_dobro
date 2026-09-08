@@ -356,3 +356,18 @@ def broadcast_preview(segment_title: str, recipients: int, body: str) -> str:
         f"Получателей: <b>{recipients}</b>\n"
         f"{'─' * 20}\n\n{body}"
     )
+
+
+def db_expiry_warning() -> str | None:
+    """Free hosted databases are deleted on a deadline — warn P&C while there is still time to export."""
+    days = settings.db_days_left()
+    if days is None or days > 7:
+        return None
+    when = settings.db_expiry_date.strftime("%d.%m.%Y")
+    if days < 0:
+        return f"🔴 <b>База данных должна была быть удалена {when}.</b> Срочно выгрузите итоги: /admin → 📥 Экспорт Excel."
+    when_txt = "сегодня" if days == 0 else f"через {days} дн. ({when})"
+    return (
+        f"🔴 <b>Внимание: база данных будет удалена {when_txt}.</b>\n"
+        "Выгрузите итоги марафона, пока данные на месте: /admin → 📥 Экспорт Excel."
+    )

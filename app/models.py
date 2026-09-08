@@ -81,7 +81,7 @@ class Team(Base):
     captain_id: Mapped[int | None] = mapped_column(Integer)  # users.id
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
 
-    members: Mapped[list[User]] = relationship(back_populates="team", foreign_keys=[User.team_id])
+    members: Mapped[list[User]] = relationship(back_populates="team", foreign_keys=[User.team_id], order_by="User.id")
 
 
 class Task(Base):

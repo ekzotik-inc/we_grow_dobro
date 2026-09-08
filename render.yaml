@@ -1,0 +1,36 @@
+# Чертёж развёртывания на Render (https://render.com/docs/blueprint-spec).
+# Как применить: Render → New → Blueprint → выбрать этот репозиторий → Apply.
+# Render создаст веб-сервис и базу, спросит только BOT_TOKEN и ADMIN_IDS.
+services:
+  - type: web
+    name: we-grow-dobro
+    runtime: python
+    plan: free
+    region: frankfurt          # ближе к Европе; Telegram доступен напрямую
+    branch: main
+    buildCommand: pip install -r requirements.txt
+    startCommand: python -m app.main
+    healthCheckPath: /api/health
+    autoDeploy: true           # каждый git push в main выкатывается сам
+    envVars:
+      - key: PYTHON_VERSION
+        value: "3.12.6"
+      - key: DATABASE_URL      # строка подключения подставляется автоматически
+        fromDatabase:
+          name: we-grow-dobro-db
+          property: connectionString
+      - key: BOT_TOKEN         # sync: false — Render спросит значение и не сохранит его в git
+        sync: false
+      - key: ADMIN_IDS
+        sync: false
+      - key: TZ
+        value: Asia/Almaty
+      - key: FORCE_WEEK        # 1/2/3 — принудительно открыть неделю для теста, 0 — обычный режим
+        value: "0"
+      - key: DB_EXPIRES_AT     # дата удаления бесплатной базы; бот предупредит за неделю
+        sync: false
+
+databases:
+  - name: we-grow-dobro-db
+    plan: free                 # бесплатный Postgres удаляется через 30 дней после создания
+    region: frankfurt

@@ -13,6 +13,34 @@ load_dotenv()
 log = logging.getLogger(__name__)
 
 
+def _normalize_db_url(raw: str) -> str:
+    """Make a hosting provider's DATABASE_URL usable by SQLAlchemy's async engine.
+
+    Render (like Heroku) hands out `postgres://…` or `postgresql://…`, sometimes with `?sslmode=require`.
+    The async engine needs the `+asyncpg` driver, and asyncpg rejects `sslmode` as a URL parameter —
+    it would raise `TypeError: connect() got an unexpected keyword argument 'sslmode'` at startup.
+    """
+    url = (raw or "").strip()
+    if url.startswith("postgres://"):
+        url = "postgresql+asyncpg://" + url[len("postgres://") :]
+    elif url.startswith("postgresql://"):
+        url = "postgresql+asyncpg://" + url[len("postgresql://") :]
+    if "+asyncpg" in url and "?" in url:
+        base, _, query = url.partition("?")
+        kept = [p for p in query.split("&") if p and not p.startswith(("sslmode=", "ssl="))]
+        url = base + ("?" + "&".join(kept) if kept else "")
+    return url
+
+
+def _webapp_url() -> str:
+    """Explicit WEBAPP_URL wins; otherwise use the public URL the host assigns (Render sets it)."""
+    for value in (os.getenv("WEBAPP_URL"), os.getenv("RENDER_EXTERNAL_URL")):
+        value = (value or "").strip().rstrip("/")
+        if value:
+            return value
+    return ""
+
+
 def _parse_ids(raw: str) -> set[int]:
     out: set[int] = set()
     for part in raw.replace(";", ",").split(","):
@@ -45,13 +73,14 @@ class Week:
 class Settings:
     bot_token: str = os.getenv("BOT_TOKEN", "")
     admin_ids: set[int] = field(default_factory=lambda: _parse_ids(os.getenv("ADMIN_IDS", "")))
-    database_url: str = os.getenv("DATABASE_URL", "sqlite+aiosqlite:///./data/marathon.db")
-    webapp_url: str = os.getenv("WEBAPP_URL", "").rstrip("/")
+    database_url: str = _normalize_db_url(os.getenv("DATABASE_URL", "")) or "sqlite+aiosqlite:///./data/marathon.db"
+    webapp_url: str = field(default_factory=_webapp_url)
     # Channels for moderation. Optional here: both can be bound at runtime from /admin.
     reg_channel_id: str = os.getenv("REG_CHANNEL_ID", "").strip()
     results_channel_id: str = os.getenv("RESULTS_CHANNEL_ID", "").strip()
     web_host: str = os.getenv("WEB_HOST", "0.0.0.0")
-    web_port: int = int(os.getenv("WEB_PORT", "8080"))
+    # PORT is what Render (and most PaaS) assigns; binding anything else makes the host declare the service dead.
+    web_port: int = int(os.getenv("PORT") or os.getenv("WEB_PORT") or "8080")
     tz_name: str = os.getenv("TZ", "Asia/Almaty")
     team_size: int = int(os.getenv("TEAM_SIZE", "5"))
     marathon_title: str = os.getenv("MARATHON_TITLE", "Марафон добрых дел «We Grow Dobro»")
@@ -60,6 +89,10 @@ class Settings:
     reminder_hour: int = int(os.getenv("REMINDER_HOUR", "12"))
     # If set, the week is forced (useful for testing before the marathon starts). 0 = auto.
     force_week: int = int(os.getenv("FORCE_WEEK", "0"))
+    # Public URL of this service; when set, the bot pings its own /api/health so a free host does not sleep it.
+    external_url: str = os.getenv("RENDER_EXTERNAL_URL", "").strip().rstrip("/")
+    # Date the hosted database is deleted (free Render Postgres lives 30 days). Empty = no deadline.
+    db_expires_at: str = os.getenv("DB_EXPIRES_AT", "").strip()
 
     weeks: list[Week] = field(default_factory=list)
     _tz: object = None
@@ -127,6 +160,18 @@ class Settings:
 
     def is_admin(self, user_id: int) -> bool:
         return user_id in self.admin_ids
+
+    @property
+    def db_expiry_date(self) -> date | None:
+        try:
+            return date.fromisoformat(self.db_expires_at) if self.db_expires_at else None
+        except ValueError:
+            log.warning("DB_EXPIRES_AT=%r — не дата в формате ГГГГ-ММ-ДД, игнорирую.", self.db_expires_at)
+            return None
+
+    def db_days_left(self) -> int | None:
+        d = self.db_expiry_date
+        return (d - self.today()).days if d else None
 
 
 settings = Settings()

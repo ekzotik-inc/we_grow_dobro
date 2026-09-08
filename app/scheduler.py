@@ -3,9 +3,11 @@ from __future__ import annotations
 
 import logging
 
+import aiohttp
 from aiogram import Bot
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
+from apscheduler.triggers.interval import IntervalTrigger
 from sqlalchemy import select
 
 from . import services, texts
@@ -56,15 +58,18 @@ async def admin_digest_job(bot: Bot) -> None:
     async with SessionLocal() as s:
         pending = await services.pending_count(s)
         apps = await services.pending_users_count(s)
-        if not pending and not apps:
-            return
         admins = await services.list_admin_tg_ids(s)
+    warning = texts.db_expiry_warning()
+    if not pending and not apps and not warning:
+        return
     parts = []
     if apps:
         parts.append(f"🙋 заявок на модерации: <b>{apps}</b>")
     if pending:
         parts.append(f"🔎 отчётов на проверке: <b>{pending}</b>")
-    text = "🛠 Напоминание P&C — " + ", ".join(parts) + ". Откройте /admin."
+    text = ("🛠 Напоминание P&C — " + ", ".join(parts) + ". Откройте /admin.") if parts else ""
+    if warning:
+        text = (text + "\n\n" if text else "") + warning
     for a in admins:
         try:
             await bot.send_message(a, text)
@@ -72,9 +77,27 @@ async def admin_digest_job(bot: Bot) -> None:
             log.warning("digest to %s failed: %s", a, ex)
 
 
+async def keepalive_job(bot: Bot) -> None:
+    """Free hosting sleeps a web service after 15 minutes without inbound traffic, which stops the bot.
+    Requesting our own health endpoint over the public URL counts as inbound traffic and keeps it awake."""
+    if not settings.external_url:
+        return
+    url = f"{settings.external_url}/api/health"
+    try:
+        timeout = aiohttp.ClientTimeout(total=30)
+        async with aiohttp.ClientSession(timeout=timeout) as session:
+            async with session.get(url) as resp:
+                log.debug("keepalive ping %s -> %s", url, resp.status)
+    except Exception as ex:  # noqa: BLE001
+        log.warning("keepalive ping failed: %s", ex)
+
+
 def build_scheduler(bot: Bot) -> AsyncIOScheduler:
     sch = AsyncIOScheduler(timezone=settings.tz)
     sch.add_job(announce_week_job, CronTrigger(hour=settings.announce_hour, minute=0), args=[bot], id="announce")
     sch.add_job(reminder_job, CronTrigger(hour=settings.reminder_hour, minute=0), args=[bot], id="reminder")
     sch.add_job(admin_digest_job, CronTrigger(hour=18, minute=0), args=[bot], id="digest")
+    if settings.external_url:
+        sch.add_job(keepalive_job, IntervalTrigger(minutes=10), args=[bot], id="keepalive")
+        log.info("keepalive enabled: pinging %s/api/health every 10 minutes", settings.external_url)
     return sch
