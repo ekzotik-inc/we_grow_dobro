@@ -3,12 +3,14 @@ from aiogram.fsm.state import State, StatesGroup
 
 class Registration(StatesGroup):
     full_name = State()
-    department = State()
-    city = State()
+    phone = State()
+    team = State()
     confirm = State()
 
 
 class TeamCreate(StatesGroup):
+    """Creating a team is a P&C action now — participants only pick from the list."""
+
     name = State()
     emoji = State()
 

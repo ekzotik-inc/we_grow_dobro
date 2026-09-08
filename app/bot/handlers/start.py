@@ -4,7 +4,7 @@ from __future__ import annotations
 from aiogram import F, Router
 from aiogram.filters import Command, CommandStart
 from aiogram.fsm.context import FSMContext
-from aiogram.types import CallbackQuery, Message
+from aiogram.types import CallbackQuery, Message, ReplyKeyboardRemove
 
 from ... import keyboards as kb
 from ... import services, texts
@@ -112,50 +112,78 @@ async def reg_start(cq: CallbackQuery, state: FSMContext) -> None:
 async def reg_name(message: Message, state: FSMContext) -> None:
     name = " ".join(message.text.split())
     await delete_quietly(message)
-    if len(name) < 3 or len(name) > 80:
-        await edit_anchor(message.bot, message.chat.id, state, texts.registration_step("full_name", {}) + "\n\n⚠️ Введи фамилию и имя (от 3 символов).", kb.reg_kb("full_name"))
-        return
     data = await state.get_data()
     draft = data.get("draft", {})
+    if len(name) < 3 or len(name) > 80:
+        await edit_anchor(message.bot, message.chat.id, state,
+                          texts.registration_step("full_name", draft) + "\n\n⚠️ Нужны имя и фамилия, от 3 символов.",
+                          kb.reg_kb("full_name"))
+        return
     draft["full_name"] = name
     await state.update_data(draft=draft)
-    await state.set_state(Registration.department)
-    await edit_anchor(message.bot, message.chat.id, state, texts.registration_step("department", draft), kb.reg_kb("department"))
+    await state.set_state(Registration.phone)
+    await edit_anchor(message.bot, message.chat.id, state, texts.registration_step("phone", draft), kb.reg_kb("phone"))
+    # A reply keyboard is the only way to offer Telegram's "share my number" button.
+    prompt = await message.answer("👇", reply_markup=kb.phone_request_kb())
+    await state.update_data(phone_prompt_id=prompt.message_id)
 
 
-@router.message(Registration.department, F.text)
-async def reg_department(message: Message, state: FSMContext) -> None:
-    await delete_quietly(message)
+def _clean_phone(raw: str) -> str | None:
+    kept = "".join(c for c in raw if c.isdigit() or c == "+")
+    digits = kept.replace("+", "")
+    if not 10 <= len(digits) <= 15:
+        return None
+    return f"+{digits}"
+
+
+async def _phone_accepted(message: Message, state: FSMContext, phone: str) -> None:
     data = await state.get_data()
     draft = data.get("draft", {})
-    draft["department"] = " ".join(message.text.split())[:160]
+    draft["phone"] = phone
     await state.update_data(draft=draft)
-    await state.set_state(Registration.city)
-    await edit_anchor(message.bot, message.chat.id, state, texts.registration_step("city", draft), kb.reg_kb("city"))
+    await state.set_state(Registration.team)
+    # Take the reply keyboard away: the rest of the bot is inline only.
+    closer = await message.answer("✓", reply_markup=ReplyKeyboardRemove())
+    await delete_quietly(closer)
+    async with session() as s:
+        rows = await services.leaderboard(s)
+    await edit_anchor(message.bot, message.chat.id, state,
+                      texts.registration_step("team", draft), kb.reg_team_kb(rows))
 
 
-@router.message(Registration.city, F.text)
-async def reg_city(message: Message, state: FSMContext) -> None:
+@router.message(Registration.phone, F.contact)
+async def reg_phone_contact(message: Message, state: FSMContext) -> None:
+    phone = message.contact.phone_number
     await delete_quietly(message)
+    await _phone_accepted(message, state, phone if phone.startswith("+") else f"+{phone}")
+
+
+@router.message(Registration.phone, F.text)
+async def reg_phone_text(message: Message, state: FSMContext) -> None:
+    phone = _clean_phone(message.text)
+    await delete_quietly(message)
+    if not phone:
+        data = await state.get_data()
+        await edit_anchor(message.bot, message.chat.id, state,
+                          texts.registration_step("phone", data.get("draft", {}))
+                          + "\n\n⚠️ Не похоже на номер. Пример: +7 700 123 45 67",
+                          kb.reg_kb("phone"))
+        return
+    await _phone_accepted(message, state, phone)
+
+
+@router.callback_query(Registration.team, F.data.regexp(r"^reg:team:(\d+)$"))
+async def reg_team_pick(cq: CallbackQuery, state: FSMContext) -> None:
+    team_id = int(cq.data.split(":")[2])
     data = await state.get_data()
     draft = data.get("draft", {})
-    draft["city"] = " ".join(message.text.split())[:80]
+    async with session() as s:
+        team = await services.get_team(s, team_id) if team_id else None
+    draft["team_id"] = team_id or None
+    draft["team_name"] = f"{team.emoji} {team.name}" if team else "на усмотрение P&C"
     await state.update_data(draft=draft)
     await state.set_state(Registration.confirm)
-    await edit_anchor(message.bot, message.chat.id, state, texts.registration_step("confirm", draft), kb.reg_kb("confirm"))
-
-
-@router.callback_query(F.data.startswith("reg:skip:"))
-async def reg_skip(cq: CallbackQuery, state: FSMContext) -> None:
-    step = cq.data.split(":")[-1]
-    data = await state.get_data()
-    draft = data.get("draft", {})
-    if step == "department":
-        await state.set_state(Registration.city)
-        await edit(cq, texts.registration_step("city", draft), kb.reg_kb("city"))
-    else:
-        await state.set_state(Registration.confirm)
-        await edit(cq, texts.registration_step("confirm", draft), kb.reg_kb("confirm"))
+    await edit(cq, texts.registration_step("confirm", draft), kb.reg_kb("confirm"))
     await answer_cq(cq)
 
 
@@ -171,7 +199,10 @@ async def reg_confirm(cq: CallbackQuery, state: FSMContext) -> None:
         if not await services.get_flag(s, "registration_open"):
             await answer_cq(cq, "Регистрация на марафон закрыта. Обратитесь к сотруднику P&C.", alert=True)
             return
-        status = await services.register_user(s, user, draft["full_name"], draft.get("department"), draft.get("city"))
+        status = await services.register_user(
+            s, user, draft["full_name"], draft.get("department"), draft.get("city"),
+            phone=draft.get("phone"), wanted_team_id=draft.get("team_id"),
+        )
         await s.commit()
         user = await services.get_user(s, cq.from_user.id)
         if status == UserStatus.pending:

@@ -23,7 +23,7 @@
       tabs.hidden = false;
       render();
     } catch (e) {
-      app.innerHTML = '<div class="card"><b>Не удалось загрузить данные</b><div class="hint">' + esc(e.message) + '</div></div>';
+      app.innerHTML = '<div class="card"><b>Не удалось загрузить данные</b><div class="muted">' + esc(e.message) + '</div></div>';
     }
   }
 
@@ -42,47 +42,61 @@
     return { total: ts.length, submitted, approved };
   }
 
+  function weekOf(n) { return data.marathon.weeks.find((x) => x.number === n); }
+
   function home() {
     const m = data.me, mar = data.marathon;
-    let html = '<h1>🌱 ' + esc(mar.title) + '</h1>';
+    let html = '<h1>' + esc(mar.title) + '</h1><div class="sub">Марафон добрых дел</div>';
     if (m.awaiting_moderation) {
-      html += '<div class="warn">⏳ Заявка на модерации у сотрудника P&C. Команды и задания откроются после подтверждения.</div>';
+      html += '<div class="note warn">Заявка у сотрудника P&C. Задания и команда откроются, как только её подтвердят.</div>';
     } else if (m.status === 'rejected') {
-      html += '<div class="alert">❌ Заявка отклонена. Причина: ' + esc(m.reject_reason || 'не указана') + '</div>';
+      html += '<div class="note bad">Заявка отклонена. Причина: ' + esc(m.reject_reason || 'не указана') + '</div>';
     } else if (!m.registered) {
-      html += '<div class="alert">Ты ещё не зарегистрирован. Вернись в чат с ботом и нажми «Зарегистрироваться».</div>';
+      html += '<div class="note warn">Ты ещё не зарегистрирован. Вернись в чат с ботом и нажми «Участвовать».</div>';
     }
-    if (m.status === 'disqualified') html += '<div class="alert">🚫 Вы дисквалифицированы: результаты не учитываются в командном зачёте.</div>';
-    html += '<div class="card"><div class="row"><div><b>' + esc(m.name) + '</b><div class="hint">' + esc(m.department || '') + '</div></div>' +
-      '<div class="big">' + m.points + '<span class="hint" style="font-size:13px"> б.</span></div></div></div>';
+    if (m.status === 'disqualified') html += '<div class="note bad">Дисквалификация: результаты не идут в командный зачёт.</div>';
+
+    html += '<div class="hero"><div class="num">' + (mar.current_week || 1) + '</div>' +
+      '<div class="name">' + esc(m.name) + '</div>' +
+      '<div class="dept">' + esc(m.department || 'Марафон добрых дел') + '</div>' +
+      '<div class="row"><div><div class="v">' + m.points + '</div><div class="l">баллов</div></div>' +
+      (m.team ? '<div><div class="v">' + m.team.rank + '</div><div class="l">место команды</div></div>' +
+                '<div><div class="v">' + m.team.points + '</div><div class="l">у команды</div></div>' : '') +
+      '</div></div>';
+
     if (m.team) {
-      html += '<div class="card"><div class="row"><div>' + esc(m.team.emoji) + ' <b>' + esc(m.team.name) + '</b><div class="hint">' + m.team.members.length + '/' + mar.team_size + ' участников</div></div>' +
-        '<div style="text-align:right"><div class="big">' + m.team.points + '</div><div class="hint">' + m.team.rank + ' место</div></div></div></div>';
+      html += '<div class="card"><div class="row"><div><b>' + esc(m.team.emoji) + ' ' + esc(m.team.name) + '</b>' +
+        '<div class="muted">' + m.team.members.length + '/' + mar.team_size + ' участников</div></div>' +
+        '<span class="chip approved">' + m.team.rank + ' место</span></div></div>';
     } else {
-      html += '<div class="warn">⚠️ Ты не в команде. Выбери команду в боте (меню → Команды) или попроси помощь P&C.</div>';
+      html += '<div class="note warn">Команда пока не назначена. Её подбирает P&C — напиши в боте «Помощь», если хочешь в конкретную команду.</div>';
     }
+
     if (mar.status === 'before') {
-      html += '<div class="card">🗓 Марафон стартует <b>' + fmt(mar.weeks[0].start) + '</b>. Собери команду из ' + mar.team_size + ' человек!</div>';
+      html += '<div class="card">Марафон стартует <b>' + fmt(mar.weeks[0].start) + '</b>. Задания откроются в первый день первой недели.</div>';
     } else if (mar.status === 'after') {
-      html += '<div class="card">🏁 Марафон завершён. Спасибо за участие!</div>';
+      html += '<div class="card">Марафон завершён. Спасибо за участие!</div>';
     } else {
       const ws = weekStats(mar.current_week);
-      const w = mar.weeks.find((x) => x.number === mar.current_week);
-      html += '<div class="card"><div class="row"><b>Неделя ' + mar.current_week + '</b><span class="hint">' + esc(w.label) + '</span></div>' +
-        '<div class="stats" style="margin-top:10px"><div class="stat"><div class="v">' + ws.submitted + '/4</div><div class="l">отправлено</div></div>' +
-        '<div class="stat"><div class="v">' + ws.approved + '</div><div class="l">зачтено</div></div>' +
-        '<div class="stat"><div class="v">' + (4 - ws.submitted) + '</div><div class="l">ещё можно</div></div></div>' +
-        (ws.submitted === 0 ? '<div class="warn" style="margin-top:10px">❗ Минимум 1 задание в неделю — не забудь отправить отчёт в боте.</div>' : '') +
-        '<div class="progress"><i style="width:' + (ws.submitted / 4) * 100 + '%"></i></div></div>';
+      const w = weekOf(mar.current_week);
+      html += '<div class="card"><div class="row"><b>Неделя ' + mar.current_week + '</b><span class="muted">' + esc(w.label) + '</span></div>' +
+        '<div class="row" style="margin-top:12px"><div><div class="v">' + ws.submitted + '/4</div><div class="l">отправлено</div></div>' +
+        '<div><div class="v">' + ws.approved + '</div><div class="l">зачтено</div></div>' +
+        '<div><div class="v">' + (4 - ws.submitted) + '</div><div class="l">ещё можно</div></div></div>' +
+        '<div class="bar"><i style="width:' + (ws.submitted / 4) * 100 + '%"></i></div></div>' +
+        (ws.submitted === 0 ? '<div class="note warn">Минимум одно задание за неделю — отправь отчёт в боте.</div>' : '');
     }
+
     html += '<h2>Мои результаты</h2>';
     mar.weeks.forEach((w) => {
       const ts = data.tasks.filter((t) => t.week === w.number && t.submission);
-      html += '<div class="card"><b>' + w.number + ' неделя</b> <span class="hint">' + esc(w.label) + '</span>';
-      if (!ts.length) html += '<div class="hint">— отчётов нет</div>';
+      html += '<div class="card"><div class="row"><b>' + w.number + ' неделя</b><span class="muted">' + esc(w.label) + '</span></div>';
+      if (!w.visible) html += '<div class="muted">откроется ' + fmt(w.start) + '</div>';
+      else if (!ts.length) html += '<div class="muted">отчётов нет</div>';
       ts.forEach((t) => {
         const s = t.submission;
-        html += '<div class="member"><span>' + esc(t.emoji) + ' №' + t.code + ' ' + esc(t.title) + '</span><span class="badge ' + STATUS_CLASS[s.status] + '">' + esc(s.status_label) + (s.status === 'approved' ? ' +' + s.points : '') + '</span></div>';
+        html += '<div class="member"><span>' + esc(t.emoji) + ' №' + t.code + ' ' + esc(t.title) + '</span>' +
+          '<span class="chip ' + STATUS_CLASS[s.status] + '">' + esc(s.status_label) + (s.status === 'approved' ? ' +' + s.points : '') + '</span></div>';
       });
       html += '</div>';
     });
@@ -92,21 +106,26 @@
 
   function tasksView() {
     const mar = data.marathon;
-    let html = '<h1>📋 Задания</h1><div class="weeks">' +
-      mar.weeks.map((w) => '<button data-week="' + w.number + '" class="' + (w.number === week ? 'active' : '') + '">' + w.number + ' нед.</button>').join('') + '</div>';
-    const w = mar.weeks.find((x) => x.number === week);
+    let html = '<h1>Задания</h1><div class="weeks">' +
+      mar.weeks.map((w) => '<button data-week="' + w.number + '"' + (w.visible ? '' : ' disabled') +
+        ' class="' + (w.number === week ? 'active' : '') + '">' + w.number + ' нед.</button>').join('') + '</div>';
+    const w = weekOf(week);
+    if (!w.visible) {
+      return html + '<div class="note warn">Неделя ' + w.number + ' откроется ' + fmt(w.start) + '. Задания видны только в свою неделю.</div>';
+    }
     const isOpen = mar.current_week === week;
-    html += '<div class="hint" style="margin-bottom:8px">' + esc(w.label) + ' · ' + (isOpen ? '🟢 неделя активна' : (mar.current_week > week || mar.status === 'after') ? '⚪ завершена' : '🔒 откроется позже') + '</div>';
+    html += '<div class="sub">' + esc(w.label) + ' · ' + (isOpen ? 'неделя активна' : 'неделя завершена') + '</div>';
     data.tasks.filter((t) => t.week === week).forEach((t) => {
       const s = t.submission;
       const ex = expanded.has(t.id) ? ' expanded' : '';
       html += '<div class="card task' + ex + '" data-id="' + t.id + '"><div class="t">' + esc(t.emoji) + ' №' + t.code + '. ' + esc(t.title) + '</div>' +
-        '<div class="meta"><span>⭐ ' + esc(t.points_label) + ' б.</span><span>📷 мин. ' + t.min_photos + '</span>' +
-        (s ? '<span class="badge ' + STATUS_CLASS[s.status] + '">' + esc(s.status_label) + '</span>' : (t.open ? '<span class="badge open">доступно</span>' : '<span class="badge locked">закрыто</span>')) + '</div>' +
+        '<div class="meta"><span class="chip">' + esc(t.points_label) + ' б.</span><span class="chip">фото: мин. ' + t.min_photos + '</span>' +
+        (s ? '<span class="chip ' + STATUS_CLASS[s.status] + '">' + esc(s.status_label) + '</span>'
+           : '<span class="chip ' + (t.open ? 'open">доступно' : 'locked">закрыто') + '</span>') + '</div>' +
         '<div class="body">' + esc(t.description) + '<div class="cond"><b>Условия зачёта:</b>\n' + esc(t.conditions) + '</div>' +
         t.options.map((o) => '<div class="option"><b>▸ ' + esc(o.title) + ' — ' + o.points + ' б.</b>\n' + esc(o.conditions) + '</div>').join('') +
-        (s && s.review_comment ? '<div class="alert" style="margin-top:8px">Комментарий P&C: ' + esc(s.review_comment) + '</div>' : '') +
-        (t.open && (!s || s.status === 'rejected' || s.status === 'draft') ? '<button class="btn" data-submit="' + t.id + '">📤 Отправить отчёт в боте</button>' : '') +
+        (s && s.review_comment ? '<div class="note bad">Комментарий P&C: ' + esc(s.review_comment) + '</div>' : '') +
+        (t.open && (!s || s.status === 'rejected' || s.status === 'draft') ? '<button class="btn" data-submit="' + t.id + '">Отправить отчёт в боте</button>' : '') +
         '</div></div>';
     });
     return html;
@@ -114,23 +133,33 @@
 
   function team() {
     const m = data.me, mar = data.marathon;
-    if (!m.team) return '<h1>👥 Команда</h1><div class="warn">Ты пока не в команде. Открой бот → «Команды», чтобы вступить или создать свою. Если не можешь выбрать — нажми «Помощь P&C» в боте.</div>' + '<button class="btn secondary" onclick="Telegram.WebApp.close()">Открыть бот</button>';
+    if (!m.team) {
+      return '<h1>Команда</h1><div class="note warn">Команду назначает P&C — сам вступить или выйти нельзя. ' +
+        'Напиши в боте «Помощь», если хочешь в конкретную команду.</div>' +
+        '<button class="btn secondary" onclick="Telegram.WebApp.close()">Открыть чат с ботом</button>';
+    }
     const t = m.team;
     let html = '<h1>' + esc(t.emoji) + ' ' + esc(t.name) + '</h1>' +
-      '<div class="stats"><div class="stat"><div class="v">' + t.points + '</div><div class="l">баллов</div></div><div class="stat"><div class="v">' + t.rank + '</div><div class="l">место</div></div><div class="stat"><div class="v">' + t.members.length + '/' + mar.team_size + '</div><div class="l">участников</div></div></div>' +
+      '<div class="hero"><div class="num">' + t.rank + '</div>' +
+      '<div class="row"><div><div class="v">' + t.points + '</div><div class="l">баллов</div></div>' +
+      '<div><div class="v">' + t.rank + '</div><div class="l">место</div></div>' +
+      '<div><div class="v">' + t.members.length + '/' + mar.team_size + '</div><div class="l">участников</div></div></div></div>' +
       '<h2>Состав</h2><div class="card">';
     t.members.forEach((mm) => { html += '<div class="member"><span>' + esc(mm.name) + (mm.captain ? ' 👑' : '') + '</span><b>' + mm.points + ' б.</b></div>'; });
     html += '</div>';
-    if (t.members.length < mar.team_size) html += '<div class="hint">Свободных мест: ' + (mar.team_size - t.members.length) + '. Пригласи коллег — пусть выберут команду в боте.</div>';
+    if (t.members.length < mar.team_size) {
+      html += '<div class="muted">Свободных мест: ' + (mar.team_size - t.members.length) + '. Новых участников добавляет P&C.</div>';
+    }
     return html;
   }
 
   function top() {
-    let html = '<h1>🏆 Рейтинг команд</h1><div class="card">';
-    if (!data.leaderboard.length) html += '<div class="hint">Команд пока нет.</div>';
+    let html = '<h1>Рейтинг команд</h1><div class="card">';
+    if (!data.leaderboard.length) html += '<div class="muted">Команд пока нет.</div>';
     const medals = ['🥇', '🥈', '🥉'];
     data.leaderboard.forEach((r, i) => {
-      html += '<div class="lb' + (r.mine ? ' mine' : '') + '"><div class="pos">' + (medals[i] || i + 1) + '</div><div class="name">' + esc(r.emoji) + ' ' + esc(r.name) + '<div class="hint">' + r.members + ' чел.</div></div><b>' + r.points + '</b></div>';
+      html += '<div class="lb' + (r.mine ? ' mine' : '') + '"><div class="pos">' + (medals[i] || i + 1) + '</div>' +
+        '<div class="name">' + esc(r.emoji) + ' ' + esc(r.name) + '<div class="muted">' + r.members + ' чел.</div></div><b>' + r.points + '</b></div>';
     });
     return html + '</div>';
   }
@@ -140,7 +169,7 @@
   tabs.addEventListener('click', (e) => { const b = e.target.closest('button'); if (!b) return; tab = b.dataset.tab; render(); });
   app.addEventListener('click', (e) => {
     const wb = e.target.closest('[data-week]');
-    if (wb) { week = +wb.dataset.week; render(); return; }
+    if (wb) { if (wb.disabled) return; week = +wb.dataset.week; render(); return; }
     const sb = e.target.closest('[data-submit]');
     if (sb) {
       // Submitting files goes through the bot chat (Telegram Mini Apps can't upload to the bot directly).

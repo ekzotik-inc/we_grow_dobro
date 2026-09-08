@@ -96,6 +96,8 @@ class Week:
 class Settings:
     bot_token: str = os.getenv("BOT_TOKEN", "")
     admin_ids: set[int] = field(default_factory=lambda: _parse_ids(os.getenv("ADMIN_IDS", "")))
+    # P&C staff. Participants' questions and team requests go only here, never to the owner.
+    pc_ids: set[int] = field(default_factory=lambda: _parse_ids(os.getenv("PC_IDS", "")))
     database_url: str = _normalize_db_url(os.getenv("DATABASE_URL", "")) or "sqlite+aiosqlite:///./data/marathon.db"
     webapp_url: str = field(default_factory=_webapp_url)
     # Channels for moderation. Optional here: both can be bound at runtime from /admin.
@@ -110,6 +112,8 @@ class Settings:
     pc_contact: str = os.getenv("PC_CONTACT", "сотрудник P&C")
     announce_hour: int = int(os.getenv("ANNOUNCE_HOUR", "10"))
     reminder_hour: int = int(os.getenv("REMINDER_HOUR", "12"))
+    motivation_hour: int = int(os.getenv("MOTIVATION_HOUR", "11"))   # nudge every other day
+    top_hour: int = int(os.getenv("TOP_HOUR", "19"))                 # standings, Wed and Sun
     # If set, the week is forced (useful for testing before the marathon starts). 0 = auto.
     force_week: int = int(os.getenv("FORCE_WEEK", "0"))
     # Public URL of this service; when set, the bot pings its own /api/health so a free host does not sleep it.
@@ -186,7 +190,11 @@ class Settings:
         return datetime.combine(w.end, time(23, 59, 59), tzinfo=self.tz)
 
     def is_admin(self, user_id: int) -> bool:
-        return user_id in self.admin_ids
+        """Full access to the panel: the owner and every P&C member."""
+        return user_id in self.admin_ids or user_id in self.pc_ids
+
+    def is_pc(self, user_id: int) -> bool:
+        return user_id in self.pc_ids
 
     @property
     def db_expiry_date(self) -> date | None:

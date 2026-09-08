@@ -108,8 +108,9 @@ async def main() -> None:
         assert admin.is_admin
 
         # teams: 5 max, unique names
+        # P&C creates the team empty, then puts people in it — participants no longer join themselves.
         team = await services.create_team(s, users[0], "Добряки", "🔥")
-        for u in users[1:5]:
+        for u in users[0:5]:
             await services.join_team(s, u, team.id)
         try:
             await services.join_team(s, users[5], team.id)
@@ -122,6 +123,7 @@ async def main() -> None:
         except services.ServiceError as ex:
             print("ok dup name:", ex)
         team2 = await services.create_team(s, users[5], "Лучики", "🌟")
+        await services.join_team(s, users[5], team2.id)
         await services.join_team(s, users[6], team2.id)
         await s.commit()
 
@@ -239,8 +241,13 @@ async def main() -> None:
     assert r.status_code == 200, r.text
     js = r.json()
     assert js["me"]["team"]["name"] == "Добряки" and js["me"]["points"] == t_w1.points
-    assert len(js["tasks"]) == 12 and js["marathon"]["current_week"] == 1
+    # a week's tasks must not leave the server before that week starts
+    assert js["marathon"]["current_week"] == 1
+    assert {t["week"] for t in js["tasks"]} == {1}, {t["week"] for t in js["tasks"]}
+    assert [w["visible"] for w in js["marathon"]["weeks"]] == [True, False, False]
     assert client.get("/").status_code == 200 and client.get("/static/app.js").status_code == 200
+    import json, pathlib
+    pathlib.Path("/tmp/boot.json").write_text(json.dumps(js, ensure_ascii=False))
     print("web api ok:", js["me"])
     print("\nALL SMOKE TESTS PASSED")
 

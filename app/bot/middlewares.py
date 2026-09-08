@@ -20,8 +20,16 @@ _EMOJI_ERRORS = ("custom emoji", "custom_emoji", "emoji is not allowed", "EMOJI_
 _TEXT_FIELDS = ("text", "caption")
 
 
+def _buttons(method):
+    markup = getattr(method, "reply_markup", None)
+    for row in getattr(markup, "inline_keyboard", None) or []:
+        yield from row
+
+
 def _has_custom_emoji(method) -> bool:
-    return any("<tg-emoji" in (getattr(method, f, None) or "") for f in _TEXT_FIELDS)
+    if any("<tg-emoji" in (getattr(method, f, None) or "") for f in _TEXT_FIELDS):
+        return True
+    return any(getattr(b, "icon_custom_emoji_id", None) for b in _buttons(method))
 
 
 def _strip_custom_emoji(method) -> None:
@@ -29,6 +37,12 @@ def _strip_custom_emoji(method) -> None:
         value = getattr(method, field, None)
         if value and "<tg-emoji" in value:
             object.__setattr__(method, field, emoji.strip(value))
+    # Button icons carry no fallback of their own: put the plain character back in front of the label.
+    for button in _buttons(method):
+        icon = getattr(button, "icon_custom_emoji_id", None)
+        if icon:
+            object.__setattr__(button, "text", f"{emoji.char_for_id(icon)} {button.text}".strip())
+            object.__setattr__(button, "icon_custom_emoji_id", None)
 
 
 async def premium_emoji_guard(make_request, bot, method):

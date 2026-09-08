@@ -85,21 +85,27 @@ def welcome(user: User) -> str:
 
 
 def registration_step(step: str, draft: dict) -> str:
-    head = "<b>📝 Регистрация</b>\n\n"
-    done = ""
+    done = []
     if draft.get("full_name"):
-        done += f"👤 Имя: <b>{e(draft['full_name'])}</b>\n"
-    if draft.get("department"):
-        done += f"🏢 Отдел: <b>{e(draft['department'])}</b>\n"
-    if done:
-        done += "\n"
+        done.append(f"Имя: <b>{e(draft['full_name'])}</b>")
+    if draft.get("phone"):
+        done.append(f"Телефон: <b>{e(draft['phone'])}</b>")
+    if draft.get("team_name"):
+        done.append(f"Команда: <b>{e(draft['team_name'])}</b>")
+    header = f"{px('rocket')} <b>Заявка на участие</b>"
+    filled = ("\n" + "\n".join(done)) if done else ""
+
     prompts = {
-        "full_name": "Шаг 1/3. Напиши свои <b>фамилию и имя</b> сообщением в чат.",
-        "department": "Шаг 2/3. Напиши <b>отдел / должность</b> (или нажми «Пропустить»).",
-        "city": "Шаг 3/3. Напиши <b>город / офис</b> (или нажми «Пропустить»).",
-        "confirm": "Проверь данные и подтверди регистрацию. Нажимая «Подтвердить», ты принимаешь правила марафона и обязуешься дойти до конца 💪",
+        "full_name": ("Шаг 1 из 3", "Напиши имя и фамилию — так тебя увидят в команде и рейтинге."),
+        "phone": ("Шаг 2 из 3", "Оставь номер телефона. Он нужен сотруднику P&C, чтобы связаться с тобой "
+                                "по заданиям. Можно нажать кнопку и поделиться номером из Telegram."),
+        "team": ("Шаг 3 из 3", "Выбери команду, в которой хочешь участвовать. "
+                               "Окончательно распределяет сотрудник P&C — он учтёт твой выбор."),
+        "confirm": ("Последний шаг", "Проверь данные. Отправляя заявку, ты принимаешь правила "
+                                     "и обязуешься пройти марафон до конца."),
     }
-    return head + done + prompts[step]
+    title, body = prompts[step]
+    return f"{header}{filled}\n\n<b>{title}</b>\n{body}"
 
 
 MONTHS = ["января", "февраля", "марта", "апреля", "мая", "июня",
@@ -273,13 +279,16 @@ def task_card(task: Task, sub: Submission | None) -> str:
     lines = [f"{e(task.emoji)} <b>{e(task.title)}</b>", f"{px('bolt')} {task.points_label} б. · неделя {task.week}", ""]
     lines.append(e(task.description))
     lines.append("")
-    lines.append("<b>Что приложить к отчёту</b>")
-    lines.append(e(task.conditions))
     if task.options:
-        lines.append("")
-        lines.append("<b>Выбери один вариант — оба сделать нельзя</b>")
+        # Full checklists live in the report screen; the card stays short enough for a photo caption.
+        lines.append("<b>Один вариант на выбор — оба сделать нельзя</b>")
         for o in task.options:
-            lines.append(f"\n<b>{e(o.title)} — {o.points} б.</b>\n{e(o.conditions)}")
+            lines.append(f"· {e(o.title)} — {o.points} б.")
+        lines.append("")
+        lines.append("Что приложить — покажу, когда выберешь вариант.")
+    else:
+        lines.append("<b>Что приложить к отчёту</b>")
+        lines.append(e(task.conditions))
     if sub and sub.status != SubmissionStatus.cancelled:
         lines.append("")
         opt = f" · {e(sub.option.title)}" if sub.option else ""
@@ -419,16 +428,17 @@ def registration_channel_card(user: User) -> str:
     """Application card published in the registration channel."""
     lines = ["🙋 <b>Заявка на участие в марафоне</b>", ""]
     lines.append(f"👤 <b>{e(user.display_name)}</b>" + (f" (@{e(user.username)})" if user.username else ""))
+    if user.phone:
+        lines.append(f"📞 {e(user.phone)}")
     if user.department:
         lines.append(f"🏢 {e(user.department)}")
-    if user.city:
-        lines.append(f"📍 {e(user.city)}")
     lines.append(f"🆔 <code>{user.tg_id}</code>")
     if user.rules_accepted_at:
         lines.append(f"📜 Правила приняты: {user.rules_accepted_at.strftime('%d.%m.%Y %H:%M')} UTC")
     lines.append("")
     if user.status == UserStatus.pending:
         lines.append("⏳ <b>Ожидает решения.</b> Примите или отклоните заявку кнопками ниже.")
+        lines.append("При приёме участник попадёт в выбранную команду, если там есть место.")
     elif user.status == UserStatus.registered:
         who = f" (P&C id {user.moderated_by})" if user.moderated_by else ""
         when = f" · {user.moderated_at.strftime('%d.%m %H:%M')}" if user.moderated_at else ""
@@ -483,7 +493,7 @@ def pending_status(user: User) -> str:
             + (f" · {e(user.department)}" if user.department else "")
             + "\n\n"
             + voice(f"Заявку посмотрит {e(settings.pc_contact)} и подтвердит участие. "
-                    "Как только это случится — напишу сюда, и откроются команды и задания.")
+                    "Как только это случится — напишу сюда, и откроется меню с заданиями.")
         )
     return (
         f"{px('blocked')} <b>Заявка отклонена</b>\n\n"
@@ -515,3 +525,100 @@ def db_expiry_warning() -> str | None:
         f"🔴 <b>Внимание: база данных будет удалена {when_txt}.</b>\n"
         "Выгрузите итоги марафона, пока данные на месте: /admin → 📥 Экспорт Excel."
     )
+
+
+def submission_sent(task: Task) -> str:
+    return (
+        f"{px('salute')} <b>Отчёт отправлен</b>\n"
+        f"{e(task.title)}\n\n"
+        + voice("Сотрудник P&C проверит и начислит баллы. Как решит — сразу напишу сюда.")
+    )
+
+
+# ---------- pushes a participant gets after a P&C action ----------
+
+def push_approved(user: User) -> str:
+    team = f"\nКоманда: <b>{e(user.team.emoji)} {e(user.team.name)}</b>" if user.team else ""
+    return (
+        f"{px('star_eyes')} <b>Заявка принята</b>{team}\n\n"
+        + voice("Добро пожаловать в марафон! Открывай задания недели — там четыре дела на выбор.")
+    )
+
+
+def push_team_assigned(user: User, old_name: str | None) -> str:
+    moved = f" вместо «{e(old_name)}»" if old_name else ""
+    return (
+        f"{px('hug')} <b>Ты в команде {e(user.team.emoji)} {e(user.team.name)}</b>{moved}\n\n"
+        + voice("Теперь твои баллы идут в её копилку. Загляни в состав — познакомься с ребятами.")
+    )
+
+
+def push_team_removed() -> str:
+    return (
+        f"{px('thinking')} <b>Ты пока вне команды</b>\n\n"
+        + voice("Сотрудник P&C подберёт новую. Задания на это время поставлены на паузу.")
+    )
+
+
+def push_team_renamed(old: str, team: Team) -> str:
+    return (
+        f"{px('shh')} <b>Команда переименована</b>\n"
+        f"«{e(old)}» → <b>{e(team.emoji)} {e(team.name)}</b>\n\n"
+        + voice("Название новое, счёт прежний.")
+    )
+
+
+def push_team_disbanded() -> str:
+    return (
+        f"{px('thinking')} <b>Команда расформирована</b>\n\n"
+        + voice("Баллы сохранены. Сотрудник P&C переведёт тебя в другую команду.")
+    )
+
+
+def push_disqualified(reason: str) -> str:
+    return (
+        f"{px('blocked')} <b>Ты снят с марафона</b>\n"
+        f"Причина: <i>{e(reason)}</i>\n\n"
+        + voice("Результаты больше не идут в командный зачёт. Если это ошибка — напиши сотруднику P&C.")
+    )
+
+
+def push_reinstated() -> str:
+    return (
+        f"{px('salute')} <b>Участие восстановлено</b>\n\n"
+        + voice("Баллы снова в командном зачёте. Продолжаем!")
+    )
+
+
+def top_digest(rows: list[dict], people: list[tuple[str, str, int]]) -> str:
+    """Periodic standings: teams first, then the strongest participants."""
+    medals = ["🥇", "🥈", "🥉"]
+    lines = [f"{px('medal')} <b>Как идут дела</b>", "", "<b>Команды</b>"]
+    for i, r in enumerate(rows[:5]):
+        mark = medals[i] if i < 3 else f"{i + 1}."
+        lines.append(f"{mark} {e(r['team'].emoji)} {e(r['team'].name)} — {r['points']} б.")
+    if people:
+        lines.append("")
+        lines.append("<b>Участники</b>")
+        for i, (name, team, pts) in enumerate(people[:5]):
+            mark = medals[i] if i < 3 else f"{i + 1}."
+            lines.append(f"{mark} {e(name)} · {e(team)} — {pts} б.")
+    lines.append("")
+    lines.append(voice("Одно дело меняет расклад. Загляни в задания недели."))
+    return "\n".join(lines)
+
+
+# Rotated by the scheduler so the nudges never repeat two days running.
+MOTIVATION = [
+    "Доброе дело не обязано быть большим. Кофе коллеге — тоже дело.",
+    "Самое трудное — начать. Дальше идёт само.",
+    "Команда считает баллы вместе. Твой отчёт двигает всех.",
+    "Есть задания на десять минут. Загляни — вдруг сегодня как раз тот день.",
+    "Сделал доброе дело — не забудь отправить отчёт, иначе баллы не дойдут.",
+    "Пока неделя идёт, попыток сколько угодно. Отклонили — поправь и пришли снова.",
+    "Кто-то сегодня получит твою помощь и запомнит её надолго.",
+]
+
+
+def motivation(index: int) -> str:
+    return f"{px('heart')} " + voice(MOTIVATION[index % len(MOTIVATION)])

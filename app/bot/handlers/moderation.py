@@ -88,12 +88,7 @@ async def cb_mod_approve(cq: CallbackQuery) -> None:
             await channels.update_registration_post(cq.bot, s, user)
             await s.commit()
     try:
-        await cq.bot.send_message(
-            user.tg_id,
-            "🎉 <b>Заявка принята!</b>\n\nДобро пожаловать в марафон добрых дел. "
-            "Теперь выбери команду и открой задания недели.",
-            reply_markup=kb.back_kb("teams", "👥 Выбрать команду"),
-        )
+        await cq.bot.send_message(user.tg_id, texts.push_approved(user), reply_markup=kb.back_kb("menu", "🏠 Меню"))
     except Exception as ex:  # noqa: BLE001
         log.warning("notify approved user %s failed: %s", user.tg_id, ex)
     await _refresh_card(cq, user)

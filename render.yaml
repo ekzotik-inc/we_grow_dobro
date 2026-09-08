@@ -25,12 +25,18 @@ services:
         sync: false
       - key: ADMIN_IDS         # ваш Telegram id (узнать: @userinfobot)
         sync: false
+      - key: PC_IDS            # id сотрудников P&C; пусто = заявки и вопросы уходят админам
+        sync: false
       - key: TZ
         value: Asia/Almaty
       - key: PREMIUM_EMOJI   # 1 = премиум-эмодзи; нужен Telegram Premium у владельца бота
         value: "1"
       - key: VOICE_NAME      # имя, от которого бот говорит в цитатах
         value: "Добрик"
+      - key: MOTIVATION_HOUR   # час мотивирующего сообщения (через день)
+        value: "11"
+      - key: TOP_HOUR          # час публикации топа (среда и воскресенье)
+        value: "19"
       - key: FORCE_WEEK        # 1/2/3 — принудительно открыть неделю для теста, 0 — обычный режим
         value: "0"
       - key: DB_EXPIRES_AT     # с Neon оставьте пустым: база бессрочная

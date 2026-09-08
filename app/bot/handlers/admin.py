@@ -18,7 +18,7 @@ from ...models import Broadcast, SubmissionStatus, UserStatus
 from .. import channels
 from ..channels import send_files
 from ..common import ANCHOR_KEY, answer_cq, delete_quietly, edit, edit_anchor, load_user, session
-from ..states import AdminFlow
+from ..states import AdminFlow, TeamCreate
 
 log = logging.getLogger(__name__)
 router = Router(name="admin")
@@ -423,7 +423,7 @@ async def dq_reason(message: Message, state: FSMContext) -> None:
         u = await services.get_user_by_id(s, uid)
         text = await _user_card(s, u)
     try:
-        await message.bot.send_message(u.tg_id, f"🚫 <b>Вы дисквалифицированы с марафона.</b>\nПричина: {texts.e(reason)}\nВаши результаты не учитываются в командном зачёте. Вопросы — к сотруднику P&C.")
+        await message.bot.send_message(u.tg_id, texts.push_disqualified(reason))
     except Exception:  # noqa: BLE001
         pass
     await state.clear()
@@ -440,7 +440,7 @@ async def cb_reinstate(cq: CallbackQuery) -> None:
         u = await services.get_user_by_id(s, uid)
         text = await _user_card(s, u)
     try:
-        await cq.bot.send_message(u.tg_id, "♻️ Ваше участие в марафоне восстановлено. Баллы снова учитываются в командном зачёте.")
+        await cq.bot.send_message(u.tg_id, texts.push_reinstated())
     except Exception:  # noqa: BLE001
         pass
     await edit(cq, "♻️ Участник восстановлен.\n\n" + text, kb.admin_user_kb(u))
@@ -462,6 +462,7 @@ async def cb_move_to(cq: CallbackQuery) -> None:
     _, _, uid, tid = cq.data.split(":")
     async with session() as s:
         u = await services.get_user_by_id(s, int(uid))
+        old_team = u.team.name if u and u.team else None
         try:
             await services.move_user_to_team(s, u, int(tid) or None)
             await s.commit()
@@ -472,9 +473,9 @@ async def cb_move_to(cq: CallbackQuery) -> None:
         text = await _user_card(s, u)
     try:
         if u.team:
-            await cq.bot.send_message(u.tg_id, f"👥 Сотрудник P&C распределил вас в команду <b>{texts.e(u.team.emoji)} {texts.e(u.team.name)}</b>.", reply_markup=kb.back_kb("menu", "🏠 Меню"))
+            await cq.bot.send_message(u.tg_id, texts.push_team_assigned(u, old_team), reply_markup=kb.back_kb("menu", "🏠 Меню"))
         else:
-            await cq.bot.send_message(u.tg_id, "👥 Сотрудник P&C убрал вас из команды. Выберите новую команду в меню.", reply_markup=kb.back_kb("teams", "👥 Команды"))
+            await cq.bot.send_message(u.tg_id, texts.push_team_removed(), reply_markup=kb.back_kb("menu", "🏠 Меню"))
     except Exception:  # noqa: BLE001
         pass
     await edit(cq, "✅ Готово.\n\n" + text, kb.admin_user_kb(u))
@@ -482,21 +483,69 @@ async def cb_move_to(cq: CallbackQuery) -> None:
 
 
 @router.callback_query(F.data == "adm:teams")
-async def cb_adm_teams(cq: CallbackQuery) -> None:
+async def cb_adm_teams(cq: CallbackQuery, state: FSMContext) -> None:
+    await state.clear()
     async with session() as s:
         rows = await services.leaderboard(s)
     await edit(cq, texts.leaderboard_text(rows), kb.admin_teams_kb(rows))
     await answer_cq(cq)
 
 
+@router.callback_query(F.data == "adm:team_new")
+async def cb_team_new(cq: CallbackQuery, state: FSMContext) -> None:
+    """Teams are created here only — participants pick from the list at sign-up."""
+    await state.set_state(TeamCreate.name)
+    await state.update_data({ANCHOR_KEY: cq.message.message_id})
+    await edit(cq, "➕ <b>Новая команда</b>\n\nНапиши название сообщением (2–40 символов).", kb.cancel_kb("adm:teams"))
+    await answer_cq(cq)
+
+
+@router.message(TeamCreate.name, F.text)
+async def team_new_name(message: Message, state: FSMContext) -> None:
+    name = " ".join(message.text.split())[:40]
+    await delete_quietly(message)
+    if len(name) < 2:
+        await edit_anchor(message.bot, message.chat.id, state, "⚠️ Слишком коротко. Напиши название команды:", kb.cancel_kb("adm:teams"))
+        return
+    await state.update_data(team_name=name)
+    await state.set_state(TeamCreate.emoji)
+    await edit_anchor(message.bot, message.chat.id, state, f"Команда <b>{texts.e(name)}</b>. Выбери символ:", kb.team_emoji_kb())
+
+
+@router.callback_query(TeamCreate.emoji, F.data.startswith("team:emoji:"))
+async def team_new_emoji(cq: CallbackQuery, state: FSMContext) -> None:
+    emoji_char = cq.data.split(":", 2)[2]
+    data = await state.get_data()
+    async with session() as s:
+        try:
+            await services.create_team(s, None, data.get("team_name", ""), emoji_char)
+            await s.commit()
+        except services.ServiceError as ex:
+            await answer_cq(cq, str(ex), alert=True)
+            await state.set_state(TeamCreate.name)
+            await edit(cq, f"⚠️ {texts.e(str(ex))}\n\nНапиши другое название:", kb.cancel_kb("adm:teams"))
+            return
+        rows = await services.leaderboard(s)
+    await state.clear()
+    await edit(cq, "✅ Команда создана.\n\n" + texts.leaderboard_text(rows), kb.admin_teams_kb(rows))
+    await answer_cq(cq)
+
+
 # ---------- announcements / broadcast ----------
 
-async def send_to_users(bot, s, users, text: str, kind: str) -> int:
+async def send_to_users(bot, s, users, text: str, kind: str, image: str | None = None) -> int:
     """Deliver a message to an explicit list of users, throttled below Telegram's limit."""
+    from ..common import photo_for, remember_photo
+
     n = 0
     for u in users:
         try:
-            await bot.send_message(u.tg_id, text, reply_markup=kb.back_kb("menu", "🏠 Меню"))
+            photo = photo_for(image)
+            if photo is not None:
+                sent = await bot.send_photo(u.tg_id, photo, caption=text, reply_markup=kb.back_kb("menu", "🏠 Меню"))
+                remember_photo(image, sent)
+            else:
+                await bot.send_message(u.tg_id, text, reply_markup=kb.back_kb("menu", "🏠 Меню"))
             n += 1
         except Exception as ex:  # noqa: BLE001
             log.warning("broadcast to %s failed: %s", u.tg_id, ex)
@@ -506,12 +555,12 @@ async def send_to_users(bot, s, users, text: str, kind: str) -> int:
     return n
 
 
-async def broadcast(bot, s, text: str, kind: str, user_filter=None) -> int:
+async def broadcast(bot, s, text: str, kind: str, user_filter=None, image: str | None = None) -> int:
     """Send to all approved participants (optionally filtered). Used by announcements and the scheduler."""
     users = [u for u in await services.list_participants(s) if u.status == UserStatus.registered]
     if user_filter:
         users = [u for u in users if user_filter(u)]
-    return await send_to_users(bot, s, users, text, kind)
+    return await send_to_users(bot, s, users, text, kind, image)
 
 
 @router.callback_query(F.data == "adm:announce")
@@ -526,7 +575,7 @@ async def cb_announce_ok(cq: CallbackQuery) -> None:
     await answer_cq(cq, "Рассылаю…")
     async with session() as s:
         tasks = await services.list_tasks(s, week)
-        n = await broadcast(cq.bot, s, texts.week_announce(week, tasks), f"week_announce:{week}:manual")
+        n = await broadcast(cq.bot, s, texts.week_announce(week, tasks), f"week_announce:{week}:manual", image=f"week{week}.png")
     await edit(cq, f"📣 Анонс недели {week} отправлен {n} участникам.", kb.back_kb("adm", "🛠 Панель"))
 
 
@@ -838,8 +887,16 @@ async def team_rename_text(message: Message, state: FSMContext) -> None:
         if any(n.casefold() == name.casefold() for n in names):
             await edit_anchor(message.bot, message.chat.id, state, "⚠️ Такое название уже занято. Напиши другое:", kb.cancel_kb(f"adm:team:{team_id}"))
             return
+        old = team.name
         team.name = name
         await s.commit()
+        team = await services.get_team(s, team_id)
+        members = [m.tg_id for m in team.members]
+    for tg_id in members:
+        try:
+            await message.bot.send_message(tg_id, texts.push_team_renamed(old, team))
+        except Exception:  # noqa: BLE001
+            pass
     await state.clear()
     await edit_anchor(message.bot, message.chat.id, state, f"✅ Команда переименована в <b>{texts.e(name)}</b>.", kb.back_kb("adm:teams", "🏷 Команды"))
 
@@ -878,7 +935,7 @@ async def cb_team_del_ok(cq: CallbackQuery, state: FSMContext) -> None:
         await s.commit()
     for m in members:
         try:
-            await cq.bot.send_message(m.tg_id, "👥 Ваша команда была расформирована сотрудником P&C. Выберите новую команду в меню.", reply_markup=kb.back_kb("teams", "👥 Команды"))
+            await cq.bot.send_message(m.tg_id, texts.push_team_disbanded())
         except Exception:  # noqa: BLE001
             pass
     await answer_cq(cq, "Команда удалена")

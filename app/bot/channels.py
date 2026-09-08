@@ -53,6 +53,18 @@ async def send_files(bot: Bot, chat_id: int, files: list[dict]) -> list[int]:
     return ids
 
 
+async def notify_pc(bot: Bot, s, text: str, kb=None) -> int:
+    """Participants' questions reach P&C staff only — never the owner."""
+    n = 0
+    for pc_id in await services.list_pc_tg_ids(s):
+        try:
+            await bot.send_message(pc_id, text, reply_markup=kb)
+            n += 1
+        except Exception as ex:  # noqa: BLE001
+            log.warning("notify P&C %s failed: %s", pc_id, ex)
+    return n
+
+
 async def notify_admins(bot: Bot, s, text: str, kb=None) -> int:
     n = 0
     for admin_id in await services.list_admin_tg_ids(s):
@@ -72,6 +84,12 @@ async def post_registration(bot: Bot, s, user: User) -> None:
 
     # Telegram never accepts custom emoji in channels — send the plain characters there.
     text = emoji.strip(texts.registration_channel_card(user))
+    if user.wanted_team_id:
+        wanted = await services.get_team(s, user.wanted_team_id)
+        if wanted:
+            text += f"\n🌱 Просит команду: {wanted.emoji} {wanted.name}"
+    else:
+        text += "\n🌱 Команду просит подобрать P&C"
     markup = kb.moderation_kb(user.id)
     chat_id = await services.get_channel_id(s, "reg_channel_id")
     if chat_id:

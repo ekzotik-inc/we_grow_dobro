@@ -63,6 +63,7 @@ async def seed_tasks() -> None:
             task.points = item["points"]
             task.min_photos = item.get("min_photos", 1)
             task.note_required = item.get("note_required", True)
+            task.image = item.get("image")
             await s.flush()
             existing = {o.code: o for o in (await s.execute(select(TaskOption).where(TaskOption.task_id == task.id))).scalars()}
             for opt in item.get("options", []):

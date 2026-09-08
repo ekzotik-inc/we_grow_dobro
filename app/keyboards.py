@@ -1,19 +1,45 @@
 from __future__ import annotations
 
-from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup, WebAppInfo
+from aiogram.types import (
+    InlineKeyboardButton,
+    InlineKeyboardMarkup,
+    KeyboardButton,
+    ReplyKeyboardMarkup,
+    WebAppInfo,
+)
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
+from . import emoji
 from .config import settings
 from .models import Submission, SubmissionStatus, Task, Team, User
 
 
-def _btn(text: str, cb: str) -> InlineKeyboardButton:
-    return InlineKeyboardButton(text=text, callback_data=cb)
+# Colour hints (Bot API 9.4): the leading character already tells the user what a button does,
+# so the style is derived from it instead of being repeated at every call site.
+_STYLE_BY_CHAR = {
+    "✅": "success",
+    "❌": "danger",
+    "🚫": "danger",
+    "🗑": "danger",
+}
+
+
+def _btn(text: str, cb: str, style: str | None = None) -> InlineKeyboardButton:
+    icon, label = emoji.button_icon(text)
+    return InlineKeyboardButton(
+        text=label,
+        callback_data=cb,
+        icon_custom_emoji_id=icon,
+        style=style or _STYLE_BY_CHAR.get(text[:1]),
+    )
 
 
 def webapp_button(text: str = "📱 Открыть приложение") -> InlineKeyboardButton | None:
     if settings.webapp_url.startswith("https://"):
-        return InlineKeyboardButton(text=text, web_app=WebAppInfo(url=settings.webapp_url + "/"))
+        icon, label = emoji.button_icon(text)
+        return InlineKeyboardButton(
+            text=label, web_app=WebAppInfo(url=settings.webapp_url + "/"), icon_custom_emoji_id=icon
+        )
     return None
 
 
@@ -36,11 +62,32 @@ def rules_kb(registered: bool) -> InlineKeyboardMarkup:
 
 def reg_kb(step: str) -> InlineKeyboardMarkup:
     kb = InlineKeyboardBuilder()
-    if step in ("department", "city"):
-        kb.row(_btn("⏭ Пропустить", f"reg:skip:{step}"))
     if step == "confirm":
-        kb.row(_btn("✅ Подтвердить и принять правила", "reg:confirm"))
+        kb.row(_btn("✅ Отправить заявку", "reg:confirm"))
         kb.row(_btn("✏️ Заполнить заново", "reg:start"))
+    kb.row(_btn("❌ Отмена", "start"))
+    return kb.as_markup()
+
+
+def phone_request_kb() -> ReplyKeyboardMarkup:
+    """Telegram can only share a phone number through a reply keyboard button."""
+    return ReplyKeyboardMarkup(
+        keyboard=[[KeyboardButton(text="📱 Поделиться номером", request_contact=True)]],
+        resize_keyboard=True,
+        one_time_keyboard=True,
+        input_field_placeholder="или напиши номер вручную",
+    )
+
+
+def reg_team_kb(rows: list[dict]) -> InlineKeyboardMarkup:
+    """Team choice during sign-up. P&C makes the final call, so full teams are shown too."""
+    kb = InlineKeyboardBuilder()
+    for r in rows:
+        team = r["team"]
+        n = len(r["members"])
+        full = " · мест нет" if n >= settings.team_size else ""
+        kb.row(_btn(f"{team.emoji} {team.name} ({n}/{settings.team_size}){full}", f"reg:team:{team.id}"))
+    kb.row(_btn("🤝 Пусть P&C подберёт команду", "reg:team:0"))
     kb.row(_btn("❌ Отмена", "start"))
     return kb.as_markup()
 
@@ -53,13 +100,13 @@ def main_menu_kb(user: User, pending: int = 0) -> InlineKeyboardMarkup:
 
     # The primary button is whatever the participant should do next.
     if not in_team:
-        kb.row(_btn("🌱 Выбрать команду", "teams"))
+        kb.row(_btn("🌱 Выбрать команду", "teams", style="primary"))
         kb.row(_btn("📋 Задания недели", "tasks"))
     elif started:
-        kb.row(_btn("📋 Задания недели", "tasks"))
+        kb.row(_btn("📋 Задания недели", "tasks", style="primary"))
         kb.row(_btn("🌱 Моя команда", f"team:{user.team_id}"))
     else:
-        kb.row(_btn("🌱 Моя команда", f"team:{user.team_id}"))
+        kb.row(_btn("🌱 Моя команда", f"team:{user.team_id}", style="primary"))
         kb.row(_btn("📋 Задания недели", "tasks"))
 
     kb.row(_btn("⚡ Мой вклад", "me"), _btn("🏆 Рейтинг", "top"))
@@ -105,26 +152,17 @@ def teams_kb(rows: list[dict], user: User) -> InlineKeyboardMarkup:
         mark = "✔️ " if user.team_id == t.id else ("🔒 " if full else "")
         kb.row(_btn(f"{mark}{t.emoji} {t.name} ({n}/{settings.team_size})", f"team:{t.id}"))
     if not user.team_id:
-        kb.row(_btn("➕ Создать команду", "team:new"))
-        kb.row(_btn("🆘 Помощь P&C с распределением", "help:team"))
+        kb.row(_btn("🤝 Попросить P&C о распределении", "help:team"))
     kb.row(_btn("⬅️ В меню", "menu"))
     return kb.as_markup()
 
 
 def team_card_kb(team: Team, user: User, can_join: bool) -> InlineKeyboardMarkup:
+    """Read-only for participants: joining and leaving is a P&C decision."""
     kb = InlineKeyboardBuilder()
-    if user.team_id == team.id:
-        if settings.marathon_status() == "before":
-            kb.row(_btn("🚪 Покинуть команду", f"team:leave:{team.id}"))
-    elif can_join and not user.team_id:
-        kb.row(_btn("✅ Вступить в команду", f"team:join:{team.id}"))
+    if not user.team_id:
+        kb.row(_btn("🤝 Попросить P&C о распределении", "help:team"))
     kb.row(_btn("⬅️ К списку команд", "teams"))
-    return kb.as_markup()
-
-
-def team_confirm_join_kb(team_id: int) -> InlineKeyboardMarkup:
-    kb = InlineKeyboardBuilder()
-    kb.row(_btn("✅ Да, вступить", f"team:join_ok:{team_id}"), _btn("⬅️ Назад", f"team:{team_id}"))
     return kb.as_markup()
 
 
@@ -144,8 +182,17 @@ def cancel_kb(cb: str = "teams") -> InlineKeyboardMarkup:
 # ---------- tasks ----------
 
 def week_tabs_kb(active: int, tasks: list[Task], subs: dict[int, Submission]) -> InlineKeyboardMarkup:
+    from .services import week_is_visible
+
     kb = InlineKeyboardBuilder()
-    kb.row(*[_btn(("• " if w.number == active else "") + f"Неделя {w.number}", f"tasks:w:{w.number}") for w in settings.weeks])
+    # A week that has not started yet is not shown at all — no peeking ahead.
+    tabs = [
+        _btn(("• " if w.number == active else "") + f"Неделя {w.number}", f"tasks:w:{w.number}")
+        for w in settings.weeks
+        if week_is_visible(w.number)
+    ]
+    if tabs:
+        kb.row(*tabs)
     for t in tasks:
         sub = subs.get(t.id)
         icon = ""
@@ -409,13 +456,6 @@ def admin_user_kb(u: User) -> InlineKeyboardMarkup:
     return kb.as_markup()
 
 
-def dq_confirm_kb(u: User) -> InlineKeyboardMarkup:
-    kb = InlineKeyboardBuilder()
-    kb.row(_btn("🚫 Подтвердить дисквалификацию", f"adm:dq_ok:{u.id}"))
-    kb.row(_btn("⬅️ Назад", f"adm:user:{u.id}"))
-    return kb.as_markup()
-
-
 def move_team_kb(u: User, teams: list[Team]) -> InlineKeyboardMarkup:
     kb = InlineKeyboardBuilder()
     for t in teams:
@@ -446,6 +486,7 @@ def admin_teams_kb(rows: list[dict]) -> InlineKeyboardMarkup:
     for r in rows:
         t = r["team"]
         kb.row(_btn(f"{t.emoji} {t.name} ({len(r['members'])}/{settings.team_size}) · {r['points']} б.", f"adm:team:{t.id}"))
+    kb.row(_btn("➕ Создать команду", "adm:team_new"))
     kb.row(_btn("🛠 Панель", "adm"))
     return kb.as_markup()
 

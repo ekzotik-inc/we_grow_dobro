@@ -70,7 +70,7 @@ async def get_channel_id(s, key: str) -> int | None:
 async def get_or_create_user(s, tg_id: int, username: str | None) -> User:
     user = (await s.execute(select(User).where(User.tg_id == tg_id))).scalar_one_or_none()
     if user is None:
-        user = User(tg_id=tg_id, username=username, is_admin=settings.is_admin(tg_id))
+        user = User(tg_id=tg_id, username=username, is_admin=settings.is_admin(tg_id), is_pc=settings.is_pc(tg_id))
         s.add(user)
         await s.flush()
     else:
@@ -80,6 +80,9 @@ async def get_or_create_user(s, tg_id: int, username: str | None) -> User:
             changed = True
         if settings.is_admin(tg_id) and not user.is_admin:
             user.is_admin = True
+            changed = True
+        if settings.is_pc(tg_id) and not user.is_pc:
+            user.is_pc = True
             changed = True
         if changed:
             await s.flush()
@@ -96,11 +99,17 @@ async def get_user_by_id(s, user_id: int) -> User | None:
     return (await s.execute(select(User).options(selectinload(User.team)).where(User.id == user_id))).scalar_one_or_none()
 
 
-async def register_user(s, user: User, full_name: str, department: str | None, city: str | None) -> UserStatus:
+async def register_user(
+    s, user: User, full_name: str, department: str | None, city: str | None,
+    phone: str | None = None, wanted_team_id: int | None = None,
+) -> UserStatus:
     """Save the form. With moderation on, the user waits for P&C approval; otherwise joins right away."""
     user.full_name = full_name.strip()[:160]
     user.department = (department or "").strip()[:160] or None
     user.city = (city or "").strip()[:80] or None
+    if phone is not None:
+        user.phone = phone.strip()[:32] or None
+    user.wanted_team_id = wanted_team_id
     user.rules_accepted_at = datetime.utcnow()
     user.reject_reason = None
     moderation = await get_flag(s, "moderation_required")
@@ -110,12 +119,17 @@ async def register_user(s, user: User, full_name: str, department: str | None, c
 
 
 async def approve_user(s, user: User, actor_tg_id: int) -> None:
+    """Accept the application and, when the team they asked for still has room, put them there."""
     if user.status == UserStatus.registered:
         raise ServiceError("Участник уже принят.")
     user.status = UserStatus.registered
     user.reject_reason = None
     user.moderated_by = actor_tg_id
     user.moderated_at = datetime.utcnow()
+    if not user.team_id and user.wanted_team_id:
+        wanted = await get_team(s, user.wanted_team_id)
+        if wanted and await team_active_count(s, wanted.id) < settings.team_size:
+            user.team_id = wanted.id
     await s.flush()
 
 
@@ -157,10 +171,19 @@ async def list_participants(s) -> list[User]:
 
 
 async def list_admin_tg_ids(s) -> set[int]:
-    ids = set(settings.admin_ids)
-    rows = (await s.execute(select(User.tg_id).where(User.is_admin.is_(True)))).scalars()
+    """Everyone with panel access: the owner plus P&C staff."""
+    ids = set(settings.admin_ids) | set(settings.pc_ids)
+    rows = (await s.execute(select(User.tg_id).where(User.is_admin.is_(True) | User.is_pc.is_(True)))).scalars()
     ids.update(rows)
     return ids
+
+
+async def list_pc_tg_ids(s) -> set[int]:
+    """Only P&C staff — participants' questions and team requests must not reach the owner."""
+    ids = set(settings.pc_ids)
+    rows = (await s.execute(select(User.tg_id).where(User.is_pc.is_(True)))).scalars()
+    ids.update(rows)
+    return ids or await list_admin_tg_ids(s)  # nobody marked as P&C yet: fall back to the panel
 
 
 async def disqualify(s, user: User, reason: str, actor_tg_id: int) -> None:
@@ -217,21 +240,17 @@ def ensure_approved(user: User) -> None:
         raise ServiceError("Сначала пройдите регистрацию.")
 
 
-async def create_team(s, user: User, name: str, emoji: str = "🌱") -> Team:
-    ensure_approved(user)
+async def create_team(s, user: User | None, name: str, emoji: str = "🌱") -> Team:
+    """Only P&C creates teams — participants pick from the list, they never make their own."""
     name = " ".join(name.split())[:80]
     if len(name) < 2:
         raise ServiceError("Название команды слишком короткое.")
-    if user.team_id:
-        raise ServiceError("Вы уже состоите в команде. Сначала покиньте её.")
     # SQLite's lower() is ASCII-only, so compare case-insensitively in Python (teams are few).
     names = (await s.execute(select(Team.name))).scalars()
     if any(n.casefold() == name.casefold() for n in names):
         raise ServiceError("Команда с таким названием уже есть. Выберите другое название.")
-    team = Team(name=name, emoji=emoji, captain_id=user.id)
+    team = Team(name=name, emoji=emoji, captain_id=None)
     s.add(team)
-    await s.flush()
-    user.team_id = team.id
     await s.flush()
     return team
 
@@ -305,6 +324,18 @@ def task_is_open(task: Task) -> bool:
     return cw is not None and cw.number == task.week
 
 
+def week_is_visible(week: int) -> bool:
+    """A week's tasks stay hidden until that week starts; past weeks stay readable."""
+    if settings.marathon_status() == "after":
+        return True
+    cw = settings.current_week()
+    return bool(cw and week <= cw.number)
+
+
+def visible_weeks() -> list[int]:
+    return [w.number for w in settings.weeks if week_is_visible(w.number)]
+
+
 # ---------- submissions ----------
 
 def _sub_query():
@@ -339,7 +370,7 @@ async def start_submission(s, user: User, task: Task, option_id: int | None) -> 
     if not await get_flag(s, "submissions_open"):
         raise ServiceError("Приём отчётов временно приостановлен сотрудником P&C.")
     if not user.team_id:
-        raise ServiceError("Сначала вступите в команду — задания выполняются в командном зачёте.")
+        raise ServiceError("Задания идут в командный зачёт, а команды пока нет. Её назначает P&C — напишите им через «Помощь».")
     if not task_is_open(task):
         raise ServiceError("Это задание можно выполнять только в его неделю.")
     if task.has_options and option_id is None:
@@ -595,3 +626,17 @@ async def segment_users(s, code: str, arg: str | None = None) -> list[User]:
                 out.append(u)
         return out
     return []
+
+
+async def top_participants(s, limit: int = 5) -> list[tuple[str, str, int]]:
+    """Strongest participants: (name, team, points). Disqualified people are left out."""
+    points = await user_points_map(s)
+    rows = []
+    for u in await list_participants(s):
+        if u.status != UserStatus.registered:
+            continue
+        pts = points.get(u.id, 0)
+        if pts:
+            rows.append((u.display_name, f"{u.team.emoji} {u.team.name}" if u.team else "без команды", pts))
+    rows.sort(key=lambda r: -r[2])
+    return rows[:limit]

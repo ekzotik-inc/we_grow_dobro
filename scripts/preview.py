@@ -2,7 +2,7 @@
 import asyncio, os, re
 os.environ.update(BOT_TOKEN="1:x", FORCE_WEEK="1", ADMIN_IDS="999",
                   DATABASE_URL="sqlite+aiosqlite:///./data/prev.db")
-from app import services, texts, keyboards as kb
+from app import emoji, services, texts, keyboards as kb
 from app.db import SessionLocal, init_db
 
 def show(title, s, markup=None):
@@ -15,7 +15,7 @@ def show(title, s, markup=None):
     if markup:
         print("─"*64)
         for row in markup.inline_keyboard:
-            print("  " + "   ".join(f"[ {b.text} ]" for b in row))
+            print("  " + "   ".join(f"[ {(emoji.char_for_id(b.icon_custom_emoji_id) + ' ') if b.icon_custom_emoji_id else ''}{b.text} ]" for b in row))
 
 async def main():
     if os.path.exists("data/prev.db"): os.remove("data/prev.db")
@@ -29,6 +29,7 @@ async def main():
         show("МЕНЮ — без команды", texts.main_menu(u, 0, None, None, {"total_teams": 0, "approved_total": 0, "submitted": 0}), kb.main_menu_kb(u))
 
         team = await services.create_team(s, u, "Добряки", "🔥")
+        await services.join_team(s, u, team.id)
         for i in range(1, 4):
             m = await services.get_or_create_user(s, 1000+i, f"u{i}")
             await services.register_user(s, m, f"Коллега {i}", "Отдел", "Алматы")

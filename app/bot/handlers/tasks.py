@@ -27,14 +27,15 @@ async def _subs_map(s, user_id: int) -> dict:
 async def render_week(s, user, week: int):
     tasks = await services.list_tasks(s, week)
     subs = await _subs_map(s, user.id)
-    return texts.tasks_list(week, tasks, subs), kb.week_tabs_kb(week, tasks, subs)
+    return texts.tasks_list(week, tasks, subs), kb.week_tabs_kb(week, tasks, subs), f"week{week}.png"
 
 
 @router.callback_query(F.data == "tasks")
 async def cb_tasks(cq: CallbackQuery, state: FSMContext) -> None:
     await state.clear()
     cw = settings.current_week()
-    week = cw.number if cw else (1 if settings.marathon_status() == "before" else settings.weeks[-1].number)
+    visible = services.visible_weeks()
+    week = cw.number if cw else (visible[-1] if visible else 1)
     async with session() as s:
         user = await load_user(s, cq.from_user)
         if user.status == UserStatus.new:
@@ -43,8 +44,8 @@ async def cb_tasks(cq: CallbackQuery, state: FSMContext) -> None:
         if user.status in (UserStatus.pending, UserStatus.rejected):
             await answer_cq(cq, "Задания откроются после подтверждения заявки сотрудником P&C.", alert=True)
             return
-        text, markup = await render_week(s, user, week)
-    await edit(cq, text, markup)
+        text, markup, image = await render_week(s, user, week)
+    await edit(cq, text, markup, image)
     await answer_cq(cq)
 
 
@@ -52,10 +53,13 @@ async def cb_tasks(cq: CallbackQuery, state: FSMContext) -> None:
 async def cb_tasks_week(cq: CallbackQuery, state: FSMContext) -> None:
     await state.clear()
     week = int(cq.data.split(":")[2])
+    if not services.week_is_visible(week):
+        await answer_cq(cq, "Эта неделя ещё не началась — задания откроются в свой срок.", alert=True)
+        return
     async with session() as s:
         user = await load_user(s, cq.from_user)
-        text, markup = await render_week(s, user, week)
-    await edit(cq, text, markup)
+        text, markup, image = await render_week(s, user, week)
+    await edit(cq, text, markup, image)
     await answer_cq(cq)
 
 
@@ -69,8 +73,11 @@ async def cb_task(cq: CallbackQuery, state: FSMContext) -> None:
         if task is None:
             await answer_cq(cq, "Задание не найдено", alert=True)
             return
+        if not services.week_is_visible(task.week):
+            await answer_cq(cq, "Эта неделя ещё не началась.", alert=True)
+            return
         sub = await services.user_submission_for_task(s, user.id, task.id)
-    await edit(cq, texts.task_card(task, sub), kb.task_card_kb(task, sub, services.task_is_open(task), user))
+    await edit(cq, texts.task_card(task, sub), kb.task_card_kb(task, sub, services.task_is_open(task), user), task.image)
     await answer_cq(cq)
 
 
@@ -233,9 +240,9 @@ async def cb_sub_send(cq: CallbackQuery, state: FSMContext) -> None:
     await state.clear()
     await edit(
         cq,
-        "✅ <b>Отчёт отправлен на проверку!</b>\n\nСотрудник P&C проверит условия зачёта и начислит баллы. "
-        "Уведомление придёт в этот чат.\n\n" + texts.task_card(task, sub),
+        texts.submission_sent(task),
         kb.task_card_kb(task, sub, services.task_is_open(task), user),
+        task.image,
     )
     await answer_cq(cq, "Отправлено!")
 
@@ -271,7 +278,7 @@ async def cb_sub_cancel_ok(cq: CallbackQuery, state: FSMContext) -> None:
         task = await services.get_task(s, sub.task_id)
         sub = await services.get_submission(s, sub.id)
     await state.clear()
-    await edit(cq, texts.task_card(task, sub), kb.task_card_kb(task, sub, services.task_is_open(task), user))
+    await edit(cq, texts.task_card(task, sub), kb.task_card_kb(task, sub, services.task_is_open(task), user), task.image)
     await answer_cq(cq, "Отчёт отменён")
 
 

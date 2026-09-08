@@ -104,7 +104,16 @@ async def bootstrap(tg=Depends(current_tg_user)):
                 "status": settings.marathon_status(),
                 "current_week": cw.number if cw else None,
                 "team_size": settings.team_size,
-                "weeks": [{"number": w.number, "start": w.start.isoformat(), "end": w.end.isoformat(), "label": w.label} for w in settings.weeks],
+                "weeks": [
+                    {
+                        "number": w.number,
+                        "start": w.start.isoformat(),
+                        "end": w.end.isoformat(),
+                        "label": w.label,
+                        "visible": services.week_is_visible(w.number),
+                    }
+                    for w in settings.weeks
+                ],
                 "pc_contact": settings.pc_contact,
             },
             "me": {
@@ -137,6 +146,7 @@ async def bootstrap(tg=Depends(current_tg_user)):
                     "submission": _sub_json(subs[t.id]) if t.id in subs else None,
                 }
                 for t in tasks
+                if services.week_is_visible(t.week)
             ],
             "leaderboard": [
                 {

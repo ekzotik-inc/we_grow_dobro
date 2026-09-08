@@ -89,3 +89,56 @@ def strip(text: str) -> str:
     import re
 
     return re.sub(r'<tg-emoji emoji-id="\d+">(.*?)</tg-emoji>', r"\1", text)
+
+
+# --- premium emoji in inline buttons (Bot API 9.4: InlineKeyboardButton.icon_custom_emoji_id) ---
+# A button label is plain text without entities, so the emoji cannot live inside it. Instead the
+# leading character is removed and passed to Telegram as a separate icon.
+_ICON_BY_CHAR: dict[str, str] = {
+    "⚡": "bolt",
+    "📱": "phone",
+    "🚫": "blocked",
+    "🏆": "medal",
+    "🚀": "rocket",
+    "🤗": "hug",
+    "❤": "heart",
+    "🧠": "brain",
+    "💻": "laptop",
+    "😎": "cool",
+    "🤩": "star_eyes",
+    "🤝": "like",
+    "🛡": "shield",
+}
+
+
+def emoji_id(name: str) -> str | None:
+    """The custom emoji id for a button icon, or None when premium emoji are unavailable."""
+    if not enabled() or name not in CATALOGUE:
+        return None
+    return CATALOGUE[name][0]
+
+
+def button_icon(text: str) -> tuple[str | None, str]:
+    """Split a button label into (custom emoji id, label without that emoji).
+
+    Returns the label untouched when the leading character has no premium counterpart or when
+    premium emoji are switched off — the plain emoji then stays in the text, as before.
+    """
+    if not enabled() or not text:
+        return None, text
+    head = text[0]
+    rest = text[1:]
+    if rest.startswith("️"):  # variation selector belongs to the emoji, not the label
+        rest = rest[1:]
+    name = _ICON_BY_CHAR.get(head)
+    if not name:
+        return None, text
+    return emoji_id(name), rest.lstrip()
+
+
+def char_for_id(emoji_id: str) -> str:
+    """The plain character behind a custom emoji id — used to restore a button label."""
+    for eid, fallback in CATALOGUE.values():
+        if eid == emoji_id:
+            return fallback
+    return ""

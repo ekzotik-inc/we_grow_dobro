@@ -47,9 +47,12 @@ class User(Base):
     username: Mapped[str | None] = mapped_column(String(64))
     full_name: Mapped[str | None] = mapped_column(String(160))
     department: Mapped[str | None] = mapped_column(String(160))
+    phone: Mapped[str | None] = mapped_column(String(32))
+    wanted_team_id: Mapped[int | None] = mapped_column(Integer)  # team asked for at sign-up; P&C decides
     city: Mapped[str | None] = mapped_column(String(80))
     status: Mapped[UserStatus] = mapped_column(Enum(UserStatus), default=UserStatus.new)
     is_admin: Mapped[bool] = mapped_column(Boolean, default=False)
+    is_pc: Mapped[bool] = mapped_column(Boolean, default=False)  # P&C staff: participants' questions go here
     rules_accepted_at: Mapped[datetime | None] = mapped_column(DateTime)
     disqualified_reason: Mapped[str | None] = mapped_column(Text)
     reject_reason: Mapped[str | None] = mapped_column(Text)
@@ -98,6 +101,7 @@ class Task(Base):
     min_photos: Mapped[int] = mapped_column(Integer, default=1)
     note_required: Mapped[bool] = mapped_column(Boolean, default=True)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    image: Mapped[str | None] = mapped_column(String(120))  # file in data/images
 
     options: Mapped[list["TaskOption"]] = relationship(back_populates="task", order_by="TaskOption.id")
 
