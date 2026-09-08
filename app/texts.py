@@ -4,7 +4,7 @@ from __future__ import annotations
 from html import escape
 
 from .config import settings
-from .models import Submission, SubmissionStatus, Task, Team, User
+from .models import Submission, SubmissionStatus, Task, Team, User, UserStatus
 
 STATUS_ICON = {
     SubmissionStatus.draft: "📝",
@@ -259,4 +259,100 @@ def week_reminder(week: int) -> str:
         f"⏰ <b>Напоминание</b>\n\nНеделя {week} заканчивается <b>{settings.week_deadline(week).strftime('%d.%m %H:%M')}</b>, "
         "а у тебя ещё нет отправленных отчётов. По правилам нужно выполнить минимум 1 задание в неделю. "
         "Открой «Задания» и отправь отчёт 💪"
+    )
+
+
+# ---------- channel cards ----------
+
+USER_STATUS_LINE = {
+    UserStatus.new: "🆕 не завершил регистрацию",
+    UserStatus.pending: "⏳ ожидает решения P&C",
+    UserStatus.registered: "✅ принят",
+    UserStatus.rejected: "❌ заявка отклонена",
+    UserStatus.disqualified: "🚫 дисквалифицирован",
+}
+
+
+def registration_channel_card(user: User) -> str:
+    """Application card published in the registration channel."""
+    lines = ["🙋 <b>Заявка на участие в марафоне</b>", ""]
+    lines.append(f"👤 <b>{e(user.display_name)}</b>" + (f" (@{e(user.username)})" if user.username else ""))
+    if user.department:
+        lines.append(f"🏢 {e(user.department)}")
+    if user.city:
+        lines.append(f"📍 {e(user.city)}")
+    lines.append(f"🆔 <code>{user.tg_id}</code>")
+    if user.rules_accepted_at:
+        lines.append(f"📜 Правила приняты: {user.rules_accepted_at.strftime('%d.%m.%Y %H:%M')} UTC")
+    lines.append("")
+    if user.status == UserStatus.pending:
+        lines.append("⏳ <b>Ожидает решения.</b> Примите или отклоните заявку кнопками ниже.")
+    elif user.status == UserStatus.registered:
+        who = f" (P&C id {user.moderated_by})" if user.moderated_by else ""
+        when = f" · {user.moderated_at.strftime('%d.%m %H:%M')}" if user.moderated_at else ""
+        lines.append(f"✅ <b>Принят{when}</b>{who}")
+        if user.team:
+            lines.append(f"👥 Команда: {e(user.team.emoji)} {e(user.team.name)}")
+    elif user.status == UserStatus.rejected:
+        when = f" · {user.moderated_at.strftime('%d.%m %H:%M')}" if user.moderated_at else ""
+        lines.append(f"❌ <b>Отклонён{when}</b>")
+        lines.append(f"Причина: <i>{e(user.reject_reason or 'не указана')}</i>")
+    elif user.status == UserStatus.disqualified:
+        lines.append(f"🚫 <b>Дисквалифицирован.</b> Причина: <i>{e(user.disqualified_reason or '—')}</i>")
+    return "\n".join(lines)
+
+
+def submission_channel_card(sub: Submission) -> str:
+    """Report card published in the results channel (media is sent right above it)."""
+    u = sub.user
+    task = sub.task
+    lines = [f"📤 <b>Отчёт #{sub.id}</b> · неделя {sub.week}", ""]
+    lines.append(f"👤 {e(u.display_name)}" + (f" (@{e(u.username)})" if u.username else ""))
+    lines.append(f"👥 Команда: {e(u.team.emoji + ' ' + u.team.name) if u.team else '—'}")
+    lines.append(f"📋 Задание №{task.code}: <b>{e(task.title)}</b>" + (f" · опция «{e(sub.option.title)}»" if sub.option else ""))
+    lines.append(f"⭐ К начислению: <b>{sub.target_points}</b> б. · 📎 файлов: {len(sub.files or [])}")
+    lines.append("")
+    lines.append("<b>Заметка участника:</b>")
+    lines.append(e(sub.note) if sub.note else "<i>нет</i>")
+    lines.append("")
+    lines.append("<b>Условия зачёта:</b>")
+    lines.append(e(sub.option.conditions if sub.option else task.conditions))
+    lines.append("")
+    if sub.status == SubmissionStatus.pending:
+        lines.append("⏳ <b>Ожидает проверки.</b> Баллы начисляются только после «Зачесть».")
+    elif sub.status == SubmissionStatus.approved:
+        when = f" · {sub.reviewed_at.strftime('%d.%m %H:%M')}" if sub.reviewed_at else ""
+        lines.append(f"✅ <b>Зачтено{when}</b> — начислено {sub.points_awarded} б. (P&C id {sub.reviewed_by})")
+    elif sub.status == SubmissionStatus.rejected:
+        when = f" · {sub.reviewed_at.strftime('%d.%m %H:%M')}" if sub.reviewed_at else ""
+        lines.append(f"❌ <b>Отклонено{when}</b> (P&C id {sub.reviewed_by})")
+        lines.append(f"Причина: <i>{e(sub.review_comment or 'не указана')}</i>")
+    elif sub.status == SubmissionStatus.cancelled:
+        lines.append("🚫 <b>Отчёт отозван участником.</b>")
+    return "\n".join(lines)
+
+
+def pending_status(user: User) -> str:
+    """What a not-yet-approved participant sees instead of the main menu."""
+    if user.status == UserStatus.pending:
+        return (
+            "⏳ <b>Заявка на модерации</b>\n\n"
+            f"👤 {e(user.display_name)}"
+            + (f" · {e(user.department)}" if user.department else "")
+            + "\n\nСотрудник P&C проверит заявку и подтвердит участие. "
+            "Как только заявку примут, тебе придёт уведомление в этот чат, и откроются команды и задания."
+        )
+    return (
+        "❌ <b>Заявка отклонена</b>\n\n"
+        f"Причина: <i>{e(user.reject_reason or 'не указана')}</i>\n\n"
+        f"Если это ошибка — напиши {e(settings.pc_contact)} через кнопку «Помощь P&C»."
+    )
+
+
+def broadcast_preview(segment_title: str, recipients: int, body: str) -> str:
+    return (
+        f"✉️ <b>Предпросмотр рассылки</b>\n\n"
+        f"Сегмент: <b>{e(segment_title)}</b>\n"
+        f"Получателей: <b>{recipients}</b>\n"
+        f"{'─' * 20}\n\n{body}"
     )

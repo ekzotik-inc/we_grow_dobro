@@ -44,6 +44,9 @@ class Settings:
     admin_ids: set[int] = field(default_factory=lambda: _parse_ids(os.getenv("ADMIN_IDS", "")))
     database_url: str = os.getenv("DATABASE_URL", "sqlite+aiosqlite:///./data/marathon.db")
     webapp_url: str = os.getenv("WEBAPP_URL", "").rstrip("/")
+    # Channels for moderation. Optional here: both can be bound at runtime from /admin.
+    reg_channel_id: str = os.getenv("REG_CHANNEL_ID", "").strip()
+    results_channel_id: str = os.getenv("RESULTS_CHANNEL_ID", "").strip()
     web_host: str = os.getenv("WEB_HOST", "0.0.0.0")
     web_port: int = int(os.getenv("WEB_PORT", "8080"))
     tz_name: str = os.getenv("TZ", "Asia/Almaty")

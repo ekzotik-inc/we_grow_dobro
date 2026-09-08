@@ -7,11 +7,62 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import selectinload
 
 from .config import settings
-from .models import PointsLog, Submission, SubmissionStatus, Task, Team, User, UserStatus
+from .models import AppSetting, PointsLog, Submission, SubmissionStatus, Task, Team, User, UserStatus
 
 
 class ServiceError(Exception):
     """User-facing error (message is shown to the user)."""
+
+
+# ---------- runtime settings (editable from /admin) ----------
+
+SETTING_DEFAULTS = {
+    "reg_channel_id": lambda: settings.reg_channel_id,
+    "results_channel_id": lambda: settings.results_channel_id,
+    "registration_open": lambda: "1",
+    "submissions_open": lambda: "1",
+    "moderation_required": lambda: "1",
+}
+
+_settings_cache: dict[str, str | None] = {}
+
+
+async def get_setting(s, key: str) -> str | None:
+    """Runtime setting: DB value wins, otherwise the .env / built-in default."""
+    if key in _settings_cache:
+        return _settings_cache[key]
+    row = (await s.execute(select(AppSetting).where(AppSetting.key == key))).scalar_one_or_none()
+    value = row.value if row and row.value is not None else None
+    if value is None:
+        default = SETTING_DEFAULTS.get(key)
+        value = default() if default else None
+    _settings_cache[key] = value
+    return value
+
+
+async def set_setting(s, key: str, value: str | None) -> None:
+    row = (await s.execute(select(AppSetting).where(AppSetting.key == key))).scalar_one_or_none()
+    if row is None:
+        row = AppSetting(key=key)
+        s.add(row)
+    row.value = value
+    await s.flush()
+    _settings_cache[key] = value if value is not None else (SETTING_DEFAULTS[key]() if key in SETTING_DEFAULTS else None)
+
+
+def invalidate_settings_cache() -> None:
+    _settings_cache.clear()
+
+
+async def get_flag(s, key: str) -> bool:
+    return str(await get_setting(s, key) or "") == "1"
+
+
+async def get_channel_id(s, key: str) -> int | None:
+    raw = await get_setting(s, key)
+    if raw and str(raw).lstrip("-").isdigit():
+        return int(raw)
+    return None
 
 
 # ---------- users ----------
@@ -45,13 +96,51 @@ async def get_user_by_id(s, user_id: int) -> User | None:
     return (await s.execute(select(User).options(selectinload(User.team)).where(User.id == user_id))).scalar_one_or_none()
 
 
-async def register_user(s, user: User, full_name: str, department: str | None, city: str | None) -> None:
+async def register_user(s, user: User, full_name: str, department: str | None, city: str | None) -> UserStatus:
+    """Save the form. With moderation on, the user waits for P&C approval; otherwise joins right away."""
     user.full_name = full_name.strip()[:160]
     user.department = (department or "").strip()[:160] or None
     user.city = (city or "").strip()[:80] or None
-    user.status = UserStatus.registered
     user.rules_accepted_at = datetime.utcnow()
+    user.reject_reason = None
+    moderation = await get_flag(s, "moderation_required")
+    user.status = UserStatus.pending if moderation else UserStatus.registered
     await s.flush()
+    return user.status
+
+
+async def approve_user(s, user: User, actor_tg_id: int) -> None:
+    if user.status == UserStatus.registered:
+        raise ServiceError("Участник уже принят.")
+    user.status = UserStatus.registered
+    user.reject_reason = None
+    user.moderated_by = actor_tg_id
+    user.moderated_at = datetime.utcnow()
+    await s.flush()
+
+
+async def reject_user(s, user: User, actor_tg_id: int, reason: str) -> None:
+    if user.status == UserStatus.rejected:
+        raise ServiceError("Заявка уже отклонена.")
+    user.status = UserStatus.rejected
+    user.reject_reason = reason
+    user.moderated_by = actor_tg_id
+    user.moderated_at = datetime.utcnow()
+    await s.flush()
+
+
+async def pending_users(s) -> list[User]:
+    return list(
+        (
+            await s.execute(
+                select(User).options(selectinload(User.team)).where(User.status == UserStatus.pending).order_by(User.created_at)
+            )
+        ).scalars()
+    )
+
+
+async def pending_users_count(s) -> int:
+    return (await s.execute(select(func.count()).select_from(User).where(User.status == UserStatus.pending))).scalar_one()
 
 
 async def list_participants(s) -> list[User]:
@@ -116,7 +205,20 @@ async def team_active_count(s, team_id: int) -> int:
     ).scalar_one()
 
 
+def ensure_approved(user: User) -> None:
+    """Raise a user-facing error unless the participant passed P&C moderation."""
+    if user.status == UserStatus.pending:
+        raise ServiceError("Ваша заявка ещё на модерации у сотрудника P&C. Дождитесь подтверждения.")
+    if user.status == UserStatus.rejected:
+        raise ServiceError("Ваша заявка отклонена. Обратитесь к сотруднику P&C.")
+    if user.status == UserStatus.disqualified:
+        raise ServiceError("Вы дисквалифицированы с марафона.")
+    if user.status != UserStatus.registered:
+        raise ServiceError("Сначала пройдите регистрацию.")
+
+
 async def create_team(s, user: User, name: str, emoji: str = "🌱") -> Team:
+    ensure_approved(user)
     name = " ".join(name.split())[:80]
     if len(name) < 2:
         raise ServiceError("Название команды слишком короткое.")
@@ -135,6 +237,7 @@ async def create_team(s, user: User, name: str, emoji: str = "🌱") -> Team:
 
 
 async def join_team(s, user: User, team_id: int) -> Team:
+    ensure_approved(user)
     if user.team_id:
         raise ServiceError("Вы уже состоите в команде. Сначала покиньте её.")
     team = await get_team(s, team_id)
@@ -186,6 +289,13 @@ async def list_tasks(s, week: int | None = None) -> list[Task]:
     return list((await s.execute(q)).scalars())
 
 
+async def list_all_tasks(s) -> list[Task]:
+    """Every task including deactivated ones (admin view)."""
+    return list(
+        (await s.execute(select(Task).options(selectinload(Task.options)).order_by(Task.week, Task.code))).scalars()
+    )
+
+
 async def get_task(s, task_id: int) -> Task | None:
     return (await s.execute(select(Task).options(selectinload(Task.options)).where(Task.id == task_id))).scalar_one_or_none()
 
@@ -225,8 +335,9 @@ async def user_submissions(s, user_id: int) -> list[Submission]:
 
 
 async def start_submission(s, user: User, task: Task, option_id: int | None) -> Submission:
-    if user.status != UserStatus.registered:
-        raise ServiceError("Вы не являетесь активным участником марафона.")
+    ensure_approved(user)
+    if not await get_flag(s, "submissions_open"):
+        raise ServiceError("Приём отчётов временно приостановлен сотрудником P&C.")
     if not user.team_id:
         raise ServiceError("Сначала вступите в команду — задания выполняются в командном зачёте.")
     if not task_is_open(task):
@@ -403,3 +514,84 @@ async def users_without_submissions(s, week: int) -> list[User]:
         ).scalars()
     )
     return [u for u in users if u.status == UserStatus.registered and u.id not in sub_users]
+
+
+# ---------- broadcast segments ----------
+
+SEGMENTS: list[tuple[str, str, str]] = [
+    ("all", "Все участники", "Все принятые участники марафона"),
+    ("no_team", "Без команды", "Приняты, но не выбрали команду"),
+    ("no_reports_week", "Нет отчётов на этой неделе", "Ни одного отправленного отчёта в текущую неделю"),
+    ("lt_n_week", "Меньше N заданий за неделю", "Отправили меньше выбранного числа заданий"),
+    ("no_approved_all", "Ни одного зачтённого задания", "За весь марафон нет зачтённых отчётов"),
+    ("rejected_week", "Отчёт отклонён и не переделан", "Есть отклонённый отчёт без повторной отправки"),
+    ("pending_review", "Ждут проверки отчёта", "Есть отчёт со статусом «на проверке»"),
+    ("pending_approval", "Заявки на модерации", "Заполнили анкету и ждут решения P&C"),
+    ("disqualified", "Дисквалифицированные", "Исключены из командного зачёта"),
+    ("team", "Конкретная команда", "Только участники выбранной команды"),
+]
+
+SEGMENT_TITLES = {code: title for code, title, _ in SEGMENTS}
+
+
+def segment_label(code: str, arg: str | None = None) -> str:
+    title = SEGMENT_TITLES.get(code, code)
+    if code == "lt_n_week" and arg:
+        return f"Меньше {arg} заданий за неделю"
+    if code == "team" and arg:
+        return f"Команда #{arg}"
+    return title
+
+
+async def segment_users(s, code: str, arg: str | None = None) -> list[User]:
+    """Recipients of a broadcast segment. Everything except the two moderation segments targets
+    approved participants only."""
+    users = await list_participants(s)
+    active = [u for u in users if u.status == UserStatus.registered]
+    cw = settings.current_week()
+
+    if code == "pending_approval":
+        return [u for u in users if u.status == UserStatus.pending]
+    if code == "disqualified":
+        return [u for u in users if u.status == UserStatus.disqualified]
+    if code == "all":
+        return active
+    if code == "no_team":
+        return [u for u in active if not u.team_id]
+    if code == "team":
+        team_id = int(arg) if arg and str(arg).isdigit() else 0
+        return [u for u in active if u.team_id == team_id]
+
+    subs_by_user: dict[int, list[Submission]] = {}
+    for u in active:
+        subs_by_user[u.id] = await user_submissions(s, u.id)
+
+    if code == "no_approved_all":
+        return [u for u in active if not any(x.status == SubmissionStatus.approved for x in subs_by_user[u.id])]
+    if code == "pending_review":
+        return [u for u in active if any(x.status == SubmissionStatus.pending for x in subs_by_user[u.id])]
+
+    if not cw:
+        return []
+    week = cw.number
+
+    def sent_this_week(u: User) -> list[Submission]:
+        return [
+            x
+            for x in subs_by_user[u.id]
+            if x.week == week and x.status in (SubmissionStatus.pending, SubmissionStatus.approved)
+        ]
+
+    if code == "no_reports_week":
+        return [u for u in active if not sent_this_week(u)]
+    if code == "lt_n_week":
+        n = int(arg) if arg and str(arg).isdigit() else 1
+        return [u for u in active if len(sent_this_week(u)) < n]
+    if code == "rejected_week":
+        out = []
+        for u in active:
+            week_subs = [x for x in subs_by_user[u.id] if x.week == week]
+            if any(x.status == SubmissionStatus.rejected for x in week_subs):
+                out.append(u)
+        return out
+    return []

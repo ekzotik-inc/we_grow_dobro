@@ -55,12 +55,19 @@ async def reminder_job(bot: Bot) -> None:
 async def admin_digest_job(bot: Bot) -> None:
     async with SessionLocal() as s:
         pending = await services.pending_count(s)
-        if not pending:
+        apps = await services.pending_users_count(s)
+        if not pending and not apps:
             return
         admins = await services.list_admin_tg_ids(s)
+    parts = []
+    if apps:
+        parts.append(f"🙋 заявок на модерации: <b>{apps}</b>")
+    if pending:
+        parts.append(f"🔎 отчётов на проверке: <b>{pending}</b>")
+    text = "🛠 Напоминание P&C — " + ", ".join(parts) + ". Откройте /admin."
     for a in admins:
         try:
-            await bot.send_message(a, f"🛠 Напоминание P&C: в очереди проверки <b>{pending}</b> отчётов. Откройте /admin.")
+            await bot.send_message(a, text)
         except Exception as ex:  # noqa: BLE001
             log.warning("digest to %s failed: %s", a, ex)
 

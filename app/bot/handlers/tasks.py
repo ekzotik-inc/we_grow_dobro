@@ -5,12 +5,14 @@ import logging
 
 from aiogram import F, Router
 from aiogram.fsm.context import FSMContext
-from aiogram.types import CallbackQuery, InputMediaDocument, InputMediaPhoto, InputMediaVideo, Message
+from aiogram.types import CallbackQuery, Message
 
 from ... import keyboards as kb
 from ... import services, texts
 from ...config import settings
 from ...models import SubmissionStatus, UserStatus
+from .. import channels
+from ..channels import send_files
 from ..common import ANCHOR_KEY, answer_cq, delete_quietly, edit, edit_anchor, load_user, session
 from ..states import SubmissionFlow
 
@@ -37,6 +39,9 @@ async def cb_tasks(cq: CallbackQuery, state: FSMContext) -> None:
         user = await load_user(s, cq.from_user)
         if user.status == UserStatus.new:
             await answer_cq(cq, "Сначала зарегистрируйся", alert=True)
+            return
+        if user.status in (UserStatus.pending, UserStatus.rejected):
+            await answer_cq(cq, "Задания откроются после подтверждения заявки сотрудником P&C.", alert=True)
             return
         text, markup = await render_week(s, user, week)
     await edit(cq, text, markup)
@@ -185,38 +190,6 @@ async def cb_sub_pop(cq: CallbackQuery, state: FSMContext) -> None:
     await answer_cq(cq, "Файл удалён")
 
 
-async def send_files(bot, chat_id: int, files: list[dict]) -> list[int]:
-    """Send stored files as media groups (max 10). Returns message ids (so callers can delete them later)."""
-    ids: list[int] = []
-    media = []
-    for f in files[:10]:
-        if f["type"] == "photo":
-            media.append(InputMediaPhoto(media=f["file_id"]))
-        elif f["type"] == "video":
-            media.append(InputMediaVideo(media=f["file_id"]))
-        else:
-            media.append(InputMediaDocument(media=f["file_id"]))
-    # Telegram forbids mixing documents with photos/videos in one album.
-    photos = [m for m in media if not isinstance(m, InputMediaDocument)]
-    docs = [m for m in media if isinstance(m, InputMediaDocument)]
-    for group in (photos, docs):
-        if not group:
-            continue
-        if len(group) == 1:
-            m = group[0]
-            if isinstance(m, InputMediaPhoto):
-                sent = await bot.send_photo(chat_id, m.media)
-            elif isinstance(m, InputMediaVideo):
-                sent = await bot.send_video(chat_id, m.media)
-            else:
-                sent = await bot.send_document(chat_id, m.media)
-            ids.append(sent.message_id)
-        else:
-            sent = await bot.send_media_group(chat_id, group)
-            ids.extend(x.message_id for x in sent)
-    return ids
-
-
 @router.callback_query(F.data.regexp(r"^sub:preview:(\d+)$"))
 async def cb_sub_preview(cq: CallbackQuery, state: FSMContext) -> None:
     sub_id = int(cq.data.split(":")[2])
@@ -254,8 +227,9 @@ async def cb_sub_send(cq: CallbackQuery, state: FSMContext) -> None:
             return
         sub = await services.get_submission(s, sub.id)
         task = sub.task
-        admins = await services.list_admin_tg_ids(s)
-        pending = await services.pending_count(s)
+        # The report goes to the results channel where P&C decides; points are awarded only on «Зачесть».
+        await channels.post_submission(cq.bot, s, sub)
+        await s.commit()
     await state.clear()
     await edit(
         cq,
@@ -264,16 +238,6 @@ async def cb_sub_send(cq: CallbackQuery, state: FSMContext) -> None:
         kb.task_card_kb(task, sub, services.task_is_open(task), user),
     )
     await answer_cq(cq, "Отправлено!")
-    for admin_id in admins:
-        try:
-            await cq.bot.send_message(
-                admin_id,
-                f"📥 Новый отчёт #{sub.id} от <b>{texts.e(user.display_name)}</b> — задание №{task.code} «{texts.e(task.title)}». "
-                f"В очереди: {pending}.",
-                reply_markup=kb.InlineKeyboardMarkup(inline_keyboard=[[kb._btn("🔎 Проверить", f"adm:sub:{sub.id}")]]),
-            )
-        except Exception as ex:  # noqa: BLE001
-            log.warning("notify admin %s failed: %s", admin_id, ex)
 
 
 @router.callback_query(F.data.regexp(r"^sub:cancel:(\d+)$"))

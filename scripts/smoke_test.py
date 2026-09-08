@@ -23,7 +23,7 @@ from app import services  # noqa: E402
 from app.config import settings  # noqa: E402
 from app.db import SessionLocal, init_db  # noqa: E402
 from app.export import export_xlsx  # noqa: E402
-from app.models import SubmissionStatus  # noqa: E402
+from app.models import SubmissionStatus, UserStatus  # noqa: E402
 from app.web.api import app  # noqa: E402
 
 
@@ -49,12 +49,51 @@ async def main() -> None:
         assert {t.code for t in opt_tasks} == {6, 9}
         print("tasks seeded:", [(t.week, t.code, t.points_label) for t in tasks])
 
-        # registration
+        # settings: defaults, override, cache invalidation
+        assert await services.get_flag(s, "moderation_required") is True
+        await services.set_setting(s, "reg_channel_id", "-1001234567890")
+        await s.commit()
+        assert await services.get_channel_id(s, "reg_channel_id") == -1001234567890
+        services.invalidate_settings_cache()
+        assert await services.get_channel_id(s, "results_channel_id") is None
+        print("settings ok")
+
+        # registration goes through moderation
         users = []
         for i in range(7):
             u = await services.get_or_create_user(s, 1000 + i, f"user{i}")
-            await services.register_user(s, u, f"Сотрудник {i}", "Отдел", "Алматы")
+            status = await services.register_user(s, u, f"Сотрудник {i}", "Отдел", "Алматы")
+            assert status == UserStatus.pending, status
             users.append(u)
+        await s.commit()
+        assert await services.pending_users_count(s) == 7
+
+        # a pending applicant cannot join teams or start reports
+        pending_user = users[0]
+        try:
+            services.ensure_approved(pending_user)
+            raise AssertionError("pending user passed the gate")
+        except services.ServiceError as ex:
+            print("ok gate pending:", ex)
+
+        # approve six, reject one
+        for u in users[:6]:
+            await services.approve_user(s, u, 999)
+        await services.reject_user(s, users[6], 999, "Не сотрудник компании")
+        await s.commit()
+        assert await services.pending_users_count(s) == 0
+        assert users[6].status == UserStatus.rejected and users[6].reject_reason
+        try:
+            services.ensure_approved(users[6])
+            raise AssertionError("rejected user passed the gate")
+        except services.ServiceError as ex:
+            print("ok gate rejected:", ex)
+        # a rejected applicant can re-apply
+        await services.register_user(s, users[6], "Сотрудник 6", "Отдел", "Алматы")
+        await services.approve_user(s, users[6], 999)
+        await s.commit()
+        print("moderation ok")
+
         admin = await services.get_or_create_user(s, 999, "pc_admin")
         assert admin.is_admin
 
@@ -144,6 +183,35 @@ async def main() -> None:
 
         idle = await services.users_without_submissions(s, 1)
         assert u0.id not in {u.id for u in idle} and len(idle) == 6
+
+        # broadcast segments
+        all_users = await services.segment_users(s, "all")
+        assert len(all_users) == 7, len(all_users)
+        assert len(await services.segment_users(s, "no_team")) == 0
+        no_reports = await services.segment_users(s, "no_reports_week")
+        assert u0.id not in {u.id for u in no_reports} and len(no_reports) == 6
+        assert len(await services.segment_users(s, "lt_n_week", "2")) == 7  # u0 sent 1 < 2
+        assert len(await services.segment_users(s, "lt_n_week", "1")) == 6
+        assert len(await services.segment_users(s, "no_approved_all")) == 6
+        assert len(await services.segment_users(s, "pending_approval")) == 0
+        assert len(await services.segment_users(s, "disqualified")) == 0
+        team_seg = await services.segment_users(s, "team", str(team.id))
+        assert len(team_seg) == 5, len(team_seg)
+        # u0's rejected report was already restarted as a draft, so nobody is "rejected and not redone"
+        assert await services.segment_users(s, "rejected_week") == []
+        sub3 = await services.start_submission(s, users[1], t_w1, None)
+        for i in range(t_w1.min_photos):
+            await services.add_file(s, sub3, {"type": "photo", "file_id": f"z{i}", "name": None})
+        await services.set_note(s, sub3, "проба")
+        await services.send_for_review(s, sub3)
+        await s.commit()
+        sub3 = await services.get_submission(s, sub3.id)
+        await services.review_submission(s, sub3, False, 999, "нет фото")
+        await s.commit()
+        rejected_seg = await services.segment_users(s, "rejected_week")
+        assert {u.id for u in rejected_seg} == {users[1].id}, rejected_seg
+        assert services.segment_label("lt_n_week", "3") == "Меньше 3 заданий за неделю"
+        print("segments ok:", {c: len(await services.segment_users(s, c)) for c, _, _ in services.SEGMENTS if c not in ("lt_n_week", "team")})
         await export_xlsx(s, __import__("pathlib").Path("data/smoke_export.xlsx"))
         print("export ok")
 

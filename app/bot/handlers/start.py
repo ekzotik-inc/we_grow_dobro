@@ -10,6 +10,7 @@ from ... import keyboards as kb
 from ... import services, texts
 from ...config import settings
 from ...models import UserStatus
+from .. import channels
 from ..common import ANCHOR_KEY, answer_cq, delete_quietly, edit, edit_anchor, load_user, remember_anchor, session
 from ..states import Registration
 
@@ -17,6 +18,9 @@ router = Router(name="start")
 
 
 async def render_menu(s, user) -> tuple[str, object]:
+    if user.status in (UserStatus.pending, UserStatus.rejected):
+        # Not approved yet: no teams, no tasks — just the application status.
+        return texts.pending_status(user), kb.pending_kb(user)
     my_points = await services.user_points(s, user.id)
     team_points = None
     rank = None
@@ -34,6 +38,8 @@ async def render_menu(s, user) -> tuple[str, object]:
 @router.message(CommandStart())
 @router.message(Command("menu"))
 async def cmd_start(message: Message, state: FSMContext) -> None:
+    if message.text and message.text.startswith("/start ") and "_" in message.text:
+        return  # deep links are handled by their own routers
     await state.clear()
     async with session() as s:
         user = await load_user(s, message.from_user)
@@ -158,11 +164,23 @@ async def reg_confirm(cq: CallbackQuery, state: FSMContext) -> None:
         return
     async with session() as s:
         user = await load_user(s, cq.from_user)
-        await services.register_user(s, user, draft["full_name"], draft.get("department"), draft.get("city"))
+        if not await services.get_flag(s, "registration_open"):
+            await answer_cq(cq, "Регистрация на марафон закрыта. Обратитесь к сотруднику P&C.", alert=True)
+            return
+        status = await services.register_user(s, user, draft["full_name"], draft.get("department"), draft.get("city"))
         await s.commit()
         user = await services.get_user(s, cq.from_user.id)
+        if status == UserStatus.pending:
+            # Publish the application card for P&C to accept or decline.
+            await channels.post_registration(cq.bot, s, user)
+            await s.commit()
+            user = await services.get_user(s, cq.from_user.id)
         text, markup = await render_menu(s, user)
     await state.clear()
     await state.update_data({ANCHOR_KEY: cq.message.message_id})
-    await edit(cq, "🎉 <b>Регистрация завершена!</b>\n\nТеперь выбери команду — без команды отчёты отправлять нельзя.\n\n" + text, markup)
-    await answer_cq(cq, "Добро пожаловать в марафон! 🌱")
+    if status == UserStatus.pending:
+        await edit(cq, "✅ <b>Анкета отправлена!</b>\n\n" + text, markup)
+        await answer_cq(cq, "Заявка отправлена на модерацию")
+    else:
+        await edit(cq, "🎉 <b>Регистрация завершена!</b>\n\nТеперь выбери команду — без команды отчёты отправлять нельзя.\n\n" + text, markup)
+        await answer_cq(cq, "Добро пожаловать в марафон! 🌱")

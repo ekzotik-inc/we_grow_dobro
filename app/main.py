@@ -55,8 +55,10 @@ async def run() -> None:
     me = await bot.get_me()
     log.info("bot @%s started; web app on %s:%s; weeks: %s", me.username, settings.web_host, settings.web_port, [(w.number, str(w.start), str(w.end)) for w in settings.weeks])
     await bot.delete_webhook(drop_pending_updates=False)
+    # resolve_used_update_types() misses channel_post, which we need for cards posted in the two channels.
+    allowed = sorted(set(dp.resolve_used_update_types()) | {"channel_post", "edited_channel_post", "callback_query", "my_chat_member"})
     try:
-        await asyncio.gather(dp.start_polling(bot, allowed_updates=dp.resolve_used_update_types()), server.serve())
+        await asyncio.gather(dp.start_polling(bot, allowed_updates=allowed), server.serve())
     finally:
         scheduler.shutdown(wait=False)
         await bot.session.close()

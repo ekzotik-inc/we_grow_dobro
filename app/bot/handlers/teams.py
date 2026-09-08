@@ -11,6 +11,7 @@ from ... import keyboards as kb
 from ... import services, texts
 from ...config import settings
 from ...models import UserStatus
+from .. import channels
 from ..common import ANCHOR_KEY, answer_cq, delete_quietly, edit, edit_anchor, load_user, session
 from ..states import HelpFlow, TeamCreate
 
@@ -46,6 +47,9 @@ async def cb_teams(cq: CallbackQuery, state: FSMContext) -> None:
         user = await load_user(s, cq.from_user)
         if user.status == UserStatus.new:
             await answer_cq(cq, "Сначала зарегистрируйся", alert=True)
+            return
+        if user.status in (UserStatus.pending, UserStatus.rejected):
+            await answer_cq(cq, "Команды откроются после подтверждения заявки сотрудником P&C.", alert=True)
             return
         text, markup = await render_teams(s, user)
     await edit(cq, text, markup)
@@ -186,17 +190,6 @@ async def cb_help(cq: CallbackQuery, state: FSMContext) -> None:
     await answer_cq(cq)
 
 
-async def _notify_admins(bot, s, text: str) -> int:
-    n = 0
-    for admin_id in await services.list_admin_tg_ids(s):
-        try:
-            await bot.send_message(admin_id, text)
-            n += 1
-        except Exception as ex:  # noqa: BLE001
-            log.warning("notify admin %s failed: %s", admin_id, ex)
-    return n
-
-
 @router.callback_query(F.data == "help:team")
 async def cb_help_team(cq: CallbackQuery) -> None:
     async with session() as s:
@@ -205,7 +198,7 @@ async def cb_help_team(cq: CallbackQuery) -> None:
             await answer_cq(cq, "Сначала зарегистрируйся", alert=True)
             return
         uname = f" (@{user.username})" if user.username else ""
-        await _notify_admins(
+        await channels.notify_admins(
             cq.bot,
             s,
             f"🆘 <b>Запрос на распределение в команду</b>\n\n{texts.e(user.display_name)}{texts.e(uname)}"
@@ -230,7 +223,7 @@ async def help_question(message: Message, state: FSMContext) -> None:
     async with session() as s:
         user = await load_user(s, message.from_user)
         uname = f" (@{user.username})" if user.username else ""
-        await _notify_admins(cq_bot := message.bot, s, f"❓ <b>Вопрос от {texts.e(user.display_name)}{texts.e(uname)}</b> (tg id {user.tg_id}):\n\n{texts.e(message.text)}")
+        await channels.notify_admins(cq_bot := message.bot, s, f"❓ <b>Вопрос от {texts.e(user.display_name)}{texts.e(uname)}</b> (tg id {user.tg_id}):\n\n{texts.e(message.text)}")
     await delete_quietly(message)
     await state.clear()
     await edit_anchor(cq_bot, message.chat.id, state, "✅ Вопрос передан сотруднику P&C. Ответ придёт в этот чат.", kb.back_kb())

@@ -45,7 +45,11 @@
   function home() {
     const m = data.me, mar = data.marathon;
     let html = '<h1>🌱 ' + esc(mar.title) + '</h1>';
-    if (!m.registered) {
+    if (m.awaiting_moderation) {
+      html += '<div class="warn">⏳ Заявка на модерации у сотрудника P&C. Команды и задания откроются после подтверждения.</div>';
+    } else if (m.status === 'rejected') {
+      html += '<div class="alert">❌ Заявка отклонена. Причина: ' + esc(m.reject_reason || 'не указана') + '</div>';
+    } else if (!m.registered) {
       html += '<div class="alert">Ты ещё не зарегистрирован. Вернись в чат с ботом и нажми «Зарегистрироваться».</div>';
     }
     if (m.status === 'disqualified') html += '<div class="alert">🚫 Вы дисквалифицированы: результаты не учитываются в командном зачёте.</div>';

@@ -24,8 +24,10 @@ class Base(DeclarativeBase):
 
 
 class UserStatus(str, enum.Enum):
-    new = "new"  # pressed /start, not registered
-    registered = "registered"  # registered, may or may not have a team
+    new = "new"  # pressed /start, has not filled the form
+    pending = "pending"  # form filled, waiting for P&C approval in the registration channel
+    registered = "registered"  # approved participant
+    rejected = "rejected"  # application declined by P&C
     disqualified = "disqualified"
 
 
@@ -50,6 +52,10 @@ class User(Base):
     is_admin: Mapped[bool] = mapped_column(Boolean, default=False)
     rules_accepted_at: Mapped[datetime | None] = mapped_column(DateTime)
     disqualified_reason: Mapped[str | None] = mapped_column(Text)
+    reject_reason: Mapped[str | None] = mapped_column(Text)
+    reg_message_id: Mapped[int | None] = mapped_column(Integer)  # card in the registration channel
+    moderated_by: Mapped[int | None] = mapped_column(BigInteger)  # tg_id of the P&C who decided
+    moderated_at: Mapped[datetime | None] = mapped_column(DateTime)
     team_id: Mapped[int | None] = mapped_column(ForeignKey("teams.id", ondelete="SET NULL"), index=True)
     menu_message_id: Mapped[int | None] = mapped_column(Integer)  # last "anchor" message we edit in place
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
@@ -134,7 +140,9 @@ class Submission(Base):
     files: Mapped[list] = mapped_column(JSON, default=list)  # [{"type": "photo"|"document"|"video", "file_id": str, "name": str|None}]
     points_awarded: Mapped[int] = mapped_column(Integer, default=0)
     review_comment: Mapped[str | None] = mapped_column(Text)
-    reviewed_by: Mapped[int | None] = mapped_column(Integer)  # tg_id of the P&C reviewer
+    reviewed_by: Mapped[int | None] = mapped_column(BigInteger)  # tg_id of the P&C reviewer
+    channel_message_id: Mapped[int | None] = mapped_column(Integer)  # card in the results channel
+    channel_media_ids: Mapped[list] = mapped_column(JSON, default=list)
     submitted_at: Mapped[datetime | None] = mapped_column(DateTime)
     reviewed_at: Mapped[datetime | None] = mapped_column(DateTime)
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
@@ -167,10 +175,20 @@ class PointsLog(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
 
 
+class AppSetting(Base):
+    """Key-value settings editable from /admin at runtime (channels, feature switches)."""
+
+    __tablename__ = "app_settings"
+
+    key: Mapped[str] = mapped_column(String(64), primary_key=True)
+    value: Mapped[str | None] = mapped_column(Text)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now(), onupdate=func.now())
+
+
 class Broadcast(Base):
     __tablename__ = "broadcasts"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    kind: Mapped[str] = mapped_column(String(40))  # week_announce:1, reminder:1, manual
+    kind: Mapped[str] = mapped_column(String(60))  # week_announce:1, reminder:1, manual:<segment>
     sent_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
     recipients: Mapped[int] = mapped_column(Integer, default=0)

@@ -40,9 +40,22 @@ async def export_xlsx(s, path: Path) -> Path:
     _sheet(
         wb,
         "Участники",
-        ["ФИО", "Username", "TG id", "Отдел", "Город", "Команда", "Статус", "Баллы", "Причина дисквалификации"],
+        ["ФИО", "Username", "TG id", "Отдел", "Город", "Команда", "Статус", "Баллы", "Модерация (кто)", "Модерация (когда)", "Причина отклонения", "Причина дисквалификации"],
         [
-            [u.full_name, u.username, u.tg_id, u.department, u.city, u.team.name if u.team else "", u.status.value, upts.get(u.id, 0), u.disqualified_reason]
+            [
+                u.full_name,
+                u.username,
+                u.tg_id,
+                u.department,
+                u.city,
+                u.team.name if u.team else "",
+                u.status.value,
+                upts.get(u.id, 0),
+                u.moderated_by,
+                u.moderated_at.strftime("%d.%m.%Y %H:%M") if u.moderated_at else "",
+                u.reject_reason,
+                u.disqualified_reason,
+            ]
             for u in users
         ],
     )

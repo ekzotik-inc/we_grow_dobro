@@ -58,6 +58,16 @@ def main_menu_kb(user: User, pending: int = 0) -> InlineKeyboardMarkup:
     return kb.as_markup()
 
 
+def pending_kb(user: User) -> InlineKeyboardMarkup:
+    """Menu for an applicant whose registration is not approved yet."""
+    kb = InlineKeyboardBuilder()
+    kb.row(_btn("🔄 Обновить статус", "menu"))
+    if user.status.value == "rejected":
+        kb.row(_btn("📝 Заполнить анкету заново", "reg:start"))
+    kb.row(_btn("📜 Правила", "rules"), _btn("🆘 Помощь P&C", "help"))
+    return kb.as_markup()
+
+
 def back_kb(cb: str = "menu", text: str = "⬅️ В меню") -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[[_btn(text, cb)]])
 
@@ -167,13 +177,129 @@ def sub_cancel_confirm_kb(sub: Submission) -> InlineKeyboardMarkup:
 
 # ---------- admin ----------
 
-def admin_menu_kb(pending: int) -> InlineKeyboardMarkup:
+def admin_menu_kb(pending: int, applications: int = 0) -> InlineKeyboardMarkup:
     kb = InlineKeyboardBuilder()
-    kb.row(_btn(f"🔎 Очередь проверки ({pending})", "adm:queue"))
+    kb.row(_btn(f"🔎 Отчёты на проверке ({pending})", "adm:queue"), _btn(f"🙋 Заявки ({applications})", "adm:apps"))
     kb.row(_btn("👥 Участники", "adm:users:0"), _btn("🏷 Команды", "adm:teams"))
-    kb.row(_btn("📣 Анонс недели", "adm:announce"), _btn("✉️ Рассылка", "adm:bcast"))
-    kb.row(_btn("📈 Статистика", "adm:stats"), _btn("📥 Экспорт Excel", "adm:export"))
+    kb.row(_btn("✉️ Рассылка по сегментам", "adm:bcast"))
+    kb.row(_btn("📣 Анонс недели", "adm:announce"), _btn("⏰ Напомнить сейчас", "adm:remind"))
+    kb.row(_btn("📋 Задания", "adm:tasks"), _btn("📈 Статистика", "adm:stats"))
+    kb.row(_btn("⚙️ Каналы и настройки", "adm:cfg"), _btn("📥 Экспорт Excel", "adm:export"))
     kb.row(_btn("⬅️ В меню", "menu"))
+    return kb.as_markup()
+
+
+# ---------- moderation of applications ----------
+
+def moderation_kb(user_id: int) -> InlineKeyboardMarkup:
+    """Buttons under an application card (works in the channel and in a DM)."""
+    kb = InlineKeyboardBuilder()
+    kb.row(_btn("✅ Принять", f"mod:ok:{user_id}"), _btn("❌ Отклонить", f"mod:rej:{user_id}"))
+    return kb.as_markup()
+
+
+MOD_REJECT_REASONS = {
+    "m1": "Вы не являетесь сотрудником компании.",
+    "m2": "Некорректные данные в анкете — заполните регистрацию заново.",
+    "m3": "Регистрация на марафон уже закрыта.",
+    "m4": "Дубликат заявки — вы уже зарегистрированы.",
+}
+
+
+def mod_reject_reason_kb(user_id: int, in_channel: bool, bot_username: str | None = None) -> InlineKeyboardMarkup:
+    kb = InlineKeyboardBuilder()
+    for code, text in MOD_REJECT_REASONS.items():
+        kb.row(_btn(text[:60], f"mod:rej_r:{user_id}:{code}"))
+    if in_channel and bot_username:
+        # A channel post has no FSM dialogue, so a free-form reason is typed in the bot's DM.
+        kb.row(InlineKeyboardButton(text="✍️ Своя причина (в личке бота)", url=f"https://t.me/{bot_username}?start=modrej_{user_id}"))
+    elif not in_channel:
+        kb.row(_btn("✍️ Своя причина", f"mod:rej_custom:{user_id}"))
+    kb.row(_btn("⬅️ Отмена", f"mod:card:{user_id}"))
+    return kb.as_markup()
+
+
+def channel_review_kb(sub: Submission) -> InlineKeyboardMarkup:
+    """Buttons under a report card in the results channel."""
+    kb = InlineKeyboardBuilder()
+    kb.row(_btn(f"✅ Зачесть +{sub.target_points}", f"adm:ok:{sub.id}"), _btn("❌ Отклонить", f"adm:rej:{sub.id}"))
+    return kb.as_markup()
+
+
+def applications_kb(users: list[User], page: int, per_page: int = 8) -> InlineKeyboardMarkup:
+    kb = InlineKeyboardBuilder()
+    chunk = users[page * per_page : (page + 1) * per_page]
+    for u in chunk:
+        kb.row(_btn(f"🙋 {u.display_name[:28]}" + (f" · {u.department[:14]}" if u.department else ""), f"mod:card:{u.id}"))
+    nav = []
+    if page > 0:
+        nav.append(_btn("⬅️", f"adm:apps:{page - 1}"))
+    if (page + 1) * per_page < len(users):
+        nav.append(_btn("➡️", f"adm:apps:{page + 1}"))
+    if nav:
+        kb.row(*nav)
+    kb.row(_btn("🛠 Панель", "adm"))
+    return kb.as_markup()
+
+
+# ---------- channels and settings ----------
+
+def config_kb(reg_ch: int | None, res_ch: int | None, flags: dict) -> InlineKeyboardMarkup:
+    kb = InlineKeyboardBuilder()
+    kb.row(_btn(("✅ " if reg_ch else "⚠️ ") + "Канал заявок", "adm:bind:reg_channel_id"))
+    kb.row(_btn(("✅ " if res_ch else "⚠️ ") + "Канал результатов", "adm:bind:results_channel_id"))
+    if reg_ch or res_ch:
+        kb.row(_btn("🧪 Проверить каналы", "adm:test_ch"))
+    kb.row(_btn(("🟢" if flags["registration_open"] else "🔴") + " Приём заявок", "adm:flag:registration_open"))
+    kb.row(_btn(("🟢" if flags["submissions_open"] else "🔴") + " Приём отчётов", "adm:flag:submissions_open"))
+    kb.row(_btn(("🟢" if flags["moderation_required"] else "🔴") + " Модерация заявок", "adm:flag:moderation_required"))
+    kb.row(_btn("🛠 Панель", "adm"))
+    return kb.as_markup()
+
+
+def bind_channel_kb(key: str) -> InlineKeyboardMarkup:
+    kb = InlineKeyboardBuilder()
+    kb.row(_btn("🗑 Отвязать канал", f"adm:unbind:{key}"))
+    kb.row(_btn("⬅️ Назад", "adm:cfg"))
+    return kb.as_markup()
+
+
+# ---------- broadcast segments ----------
+
+def segments_kb(counts: dict[str, int]) -> InlineKeyboardMarkup:
+    from .services import SEGMENTS
+
+    kb = InlineKeyboardBuilder()
+    for code, title, _ in SEGMENTS:
+        if code in ("lt_n_week", "team"):
+            kb.row(_btn(f"{title} →", f"adm:seg_pick:{code}"))
+        else:
+            kb.row(_btn(f"{title} ({counts.get(code, 0)})", f"adm:seg:{code}:"))
+    kb.row(_btn("🛠 Панель", "adm"))
+    return kb.as_markup()
+
+
+def segment_n_kb() -> InlineKeyboardMarkup:
+    kb = InlineKeyboardBuilder()
+    kb.row(*[_btn(f"< {n}", f"adm:seg:lt_n_week:{n}") for n in (1, 2, 3, 4)])
+    kb.row(_btn("⬅️ Сегменты", "adm:bcast"))
+    return kb.as_markup()
+
+
+def segment_team_kb(teams: list[Team]) -> InlineKeyboardMarkup:
+    kb = InlineKeyboardBuilder()
+    for t in teams:
+        kb.row(_btn(f"{t.emoji} {t.name}", f"adm:seg:team:{t.id}"))
+    kb.row(_btn("⬅️ Сегменты", "adm:bcast"))
+    return kb.as_markup()
+
+
+def tasks_admin_kb(tasks: list[Task]) -> InlineKeyboardMarkup:
+    kb = InlineKeyboardBuilder()
+    for t in tasks:
+        mark = "🟢" if t.is_active else "🔴"
+        kb.row(_btn(f"{mark} нед.{t.week} №{t.code} {t.title[:28]}", f"adm:task_toggle:{t.id}"))
+    kb.row(_btn("🛠 Панель", "adm"))
     return kb.as_markup()
 
 
@@ -192,7 +318,7 @@ def review_kb(sub: Submission, idx: int, total: int) -> InlineKeyboardMarkup:
     return kb.as_markup()
 
 
-def reject_reason_kb(sub_id: int) -> InlineKeyboardMarkup:
+def reject_reason_kb(sub_id: int, in_channel: bool = False, bot_username: str | None = None) -> InlineKeyboardMarkup:
     kb = InlineKeyboardBuilder()
     reasons = [
         ("Нет вас в кадре", "r1"),
@@ -203,8 +329,12 @@ def reject_reason_kb(sub_id: int) -> InlineKeyboardMarkup:
     ]
     for text, code in reasons:
         kb.row(_btn(text, f"adm:rej_r:{sub_id}:{code}"))
-    kb.row(_btn("✍️ Своя причина", f"adm:rej_custom:{sub_id}"))
-    kb.row(_btn("⬅️ Назад", f"adm:sub:{sub_id}"))
+    if in_channel and bot_username:
+        # A channel post cannot host a text dialogue — the free-form reason is typed in the bot's DM.
+        kb.row(InlineKeyboardButton(text="✍️ Своя причина (в личке бота)", url=f"https://t.me/{bot_username}?start=subrej_{sub_id}"))
+    else:
+        kb.row(_btn("✍️ Своя причина", f"adm:rej_custom:{sub_id}"))
+    kb.row(_btn("⬅️ Назад", f"adm:card:{sub_id}" if in_channel else f"adm:sub:{sub_id}"))
     return kb.as_markup()
 
 
@@ -217,26 +347,45 @@ REJECT_REASONS = {
 }
 
 
-def users_list_kb(users: list[User], page: int, per_page: int = 10) -> InlineKeyboardMarkup:
+USER_STATUS_MARK = {"registered": "", "pending": "⏳ ", "rejected": "❌ ", "disqualified": "🚫 ", "new": "🆕 "}
+
+
+def users_list_kb(users: list[User], page: int, per_page: int = 8, flt: str = "all", counts: dict | None = None) -> InlineKeyboardMarkup:
     kb = InlineKeyboardBuilder()
+    if counts is not None:
+        from .bot.handlers.admin import USER_FILTERS
+
+        kb.row(*[
+            _btn(("• " if k == flt else "") + f"{label} ({counts.get(k, 0)})", f"adm:users:0:{k}")
+            for k, label in list(USER_FILTERS.items())[:2]
+        ])
+        kb.row(*[
+            _btn(("• " if k == flt else "") + f"{label} ({counts.get(k, 0)})", f"adm:users:0:{k}")
+            for k, label in list(USER_FILTERS.items())[2:]
+        ])
     chunk = users[page * per_page : (page + 1) * per_page]
     for u in chunk:
-        st = {"registered": "", "disqualified": "🚫 ", "new": "🆕 "}[u.status.value]
+        st = USER_STATUS_MARK.get(u.status.value, "")
         team = f" · {u.team.emoji}" if u.team else " · ❔"
-        kb.row(_btn(f"{st}{u.display_name[:30]}{team}", f"adm:user:{u.id}"))
+        kb.row(_btn(f"{st}{u.display_name[:28]}{team}", f"adm:user:{u.id}"))
     nav = []
     if page > 0:
-        nav.append(_btn("⬅️", f"adm:users:{page - 1}"))
+        nav.append(_btn("⬅️", f"adm:users:{page - 1}:{flt}"))
     if (page + 1) * per_page < len(users):
-        nav.append(_btn("➡️", f"adm:users:{page + 1}"))
+        nav.append(_btn("➡️", f"adm:users:{page + 1}:{flt}"))
     if nav:
         kb.row(*nav)
+    kb.row(_btn("🔍 Поиск участника", "adm:user_search"))
     kb.row(_btn("🛠 Панель", "adm"))
     return kb.as_markup()
 
 
 def admin_user_kb(u: User) -> InlineKeyboardMarkup:
     kb = InlineKeyboardBuilder()
+    if u.status.value in ("pending", "rejected"):
+        kb.row(_btn("✅ Принять заявку", f"mod:ok:{u.id}"))
+    if u.status.value == "pending":
+        kb.row(_btn("❌ Отклонить заявку", f"mod:rej:{u.id}"))
     if u.status.value == "disqualified":
         kb.row(_btn("♻️ Восстановить", f"adm:reinstate:{u.id}"))
     elif u.status.value == "registered":
@@ -264,11 +413,25 @@ def move_team_kb(u: User, teams: list[Team]) -> InlineKeyboardMarkup:
     return kb.as_markup()
 
 
+def admin_team_manage_kb(team: Team) -> InlineKeyboardMarkup:
+    kb = InlineKeyboardBuilder()
+    kb.row(_btn("✏️ Переименовать", f"adm:team_rename:{team.id}"))
+    kb.row(_btn("🗑 Удалить команду", f"adm:team_del:{team.id}"))
+    kb.row(_btn("⬅️ Команды", "adm:teams"), _btn("🛠 Панель", "adm"))
+    return kb.as_markup()
+
+
+def admin_team_del_kb(team: Team) -> InlineKeyboardMarkup:
+    kb = InlineKeyboardBuilder()
+    kb.row(_btn("🗑 Да, удалить", f"adm:team_del_ok:{team.id}"), _btn("⬅️ Назад", f"adm:team:{team.id}"))
+    return kb.as_markup()
+
+
 def admin_teams_kb(rows: list[dict]) -> InlineKeyboardMarkup:
     kb = InlineKeyboardBuilder()
     for r in rows:
         t = r["team"]
-        kb.row(_btn(f"{t.emoji} {t.name} ({len(r['members'])}/{settings.team_size}) · {r['points']} б.", f"team:{t.id}"))
+        kb.row(_btn(f"{t.emoji} {t.name} ({len(r['members'])}/{settings.team_size}) · {r['points']} б.", f"adm:team:{t.id}"))
     kb.row(_btn("🛠 Панель", "adm"))
     return kb.as_markup()
 

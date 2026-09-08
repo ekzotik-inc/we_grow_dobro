@@ -23,5 +23,9 @@ class HelpFlow(StatesGroup):
 
 class AdminFlow(StatesGroup):
     reject_reason = State()
+    mod_reject_reason = State()
     dq_reason = State()
     broadcast = State()
+    bind_channel = State()
+    user_search = State()
+    team_rename = State()
