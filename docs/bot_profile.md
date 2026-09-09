@@ -38,5 +38,26 @@ menu - Главное меню
 rules - Правила марафона
 ```
 
-## Картинка профиля
-`data/images/week1.png` или логотип марафона — квадрат, минимум 512×512.
+## Description Picture — картинка над описанием
+Стандарт Telegram: **640×360**, JPG или PNG. Видна на пустом экране до нажатия «Запустить»,
+вместе с текстом описания.
+
+Файл: `data/images/description.png` (640×360, уже готов).
+
+@BotFather → `/mybots` → бот → **Edit Bot** → **Edit Description Picture** → отправить файл.
+Убрать её потом: **Delete Description Picture**.
+
+*Вместо картинки можно поставить видео (Edit Description Video): 640×360, до 30 секунд и до 1 МБ.
+Оно проигрывается автоматически и заменяет картинку.*
+
+## Botpic — аватар бота
+Квадрат, минимум 512×512; Telegram обрезает его в круг.
+
+Файл: `data/images/botpic.png` (512×512, уже готов).
+
+@BotFather → **Edit Bot** → **Edit Botpic**.
+
+## Перегенерировать картинки
+```
+python -m scripts.make_botpic
+```
