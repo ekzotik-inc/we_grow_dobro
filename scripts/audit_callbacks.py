@@ -107,7 +107,7 @@ async def main():
 
     cbs = callbacks(ids)
     print(f"кнопок для проверки: {len(cbs)}")
-    for who, uid in (("админ", ADMIN), ("P&C", PC), ("участник", USER)):
+    for who, uid in (("владелец", ADMIN), ("P&C", PC), ("участник", USER)):
         for raw, data in cbs:
             seen.clear()
             try:

@@ -188,6 +188,85 @@ async def check_admin_router_blocks() -> None:
     print("admin router ok")
 
 
+async def check_manual_results() -> None:
+    """Ручная корректировка (/addresult): баллы, отмена зачёта, обнуление — и доступ только у владельца."""
+    owner = sorted(settings.admin_ids)[0]
+    pc_id = sorted(settings.pc_ids)[0]
+    async with SessionLocal() as s:
+        for w in (1, 2, 3):
+            await services.set_week_open(s, w, True)
+        team = await services.create_team(s, None, "Ручная корректировка", "🧪")
+        members = []
+        for i in range(2):
+            u = await services.get_or_create_user(s, 9100 + i, f"manual{i}")
+            await services.register_user(s, u, f"Ручной Участник {i}", "IT", "Ташкент")
+            await services.approve_user(s, u, owner)
+            await services.join_team(s, u, team.id)
+            members.append(u)
+        await s.commit()
+
+        task = (await services.list_tasks(s, 1))[0]
+        sub = await services.start_submission(s, members[0], task, None)
+        await fill_steps(s, sub)
+        await services.send_for_review(s, sub)
+        await s.commit()
+        sub = await services.get_submission(s, sub.id)
+        await services.review_submission(s, sub, True, owner)
+        await s.commit()
+        earned = await services.user_points(s, members[0].id)
+        assert earned == task.points
+
+        # начисление и списание попадают и в личный, и в командный зачёт
+        total = await services.adjust_points(s, members[0], 150, "помощь в организации", owner)
+        await s.commit()
+        assert total == earned + 150, total
+        team_points = next(r["points"] for r in await services.leaderboard(s) if r["team"].id == team.id)
+        assert team_points == total, team_points
+        total = await services.adjust_points(s, members[0], -50, "поправка", owner)
+        await s.commit()
+        assert total == earned + 100
+
+        # отмена зачёта: баллы снимаются, отчёт можно переделать
+        returned = await services.revoke_review(s, sub, owner, "фото не по условиям")
+        await s.commit()
+        sub = await services.get_submission(s, sub.id)
+        assert returned == task.points and sub.status == SubmissionStatus.rejected
+        assert await services.user_points(s, members[0].id) == 100
+        redo = await services.start_submission(s, members[0], task, None)
+        assert redo.status == SubmissionStatus.draft, "после отмены зачёта отчёт должен открываться заново"
+        await services.cancel_submission(s, redo)
+        await s.commit()
+
+        info = await services.clear_user_results(s, members[0], owner)
+        await s.commit()
+        assert info["points"] == 100 and await services.user_points(s, members[0].id) == 0
+
+        team = await services.get_team(s, team.id)
+        info = await services.clear_team_results(s, team, owner)
+        await s.commit()
+        assert info["members"] == 2, info
+        assert next(r["points"] for r in await services.leaderboard(s) if r["team"].id == team.id) == 0
+
+        assert await services.recent_points_log(s, 3), "журнал начислений должен вестись"
+        for u in members:
+            await services.delete_user(s, await services.get_user_by_id(s, u.id))
+        await s.delete(await services.get_team(s, team.id))
+        for w in (2, 3):
+            await services.set_week_open(s, w, False)
+        await s.commit()
+
+    # доступ: только владелец, P&C и участники — мимо
+    from app.bot.handlers.results import IsOwner
+
+    class Event:
+        def __init__(self, uid): self.from_user = type("U", (), {"id": uid})()
+
+    assert await IsOwner()(Event(owner)), "владелец должен иметь доступ"
+    assert not await IsOwner()(Event(pc_id)), "у P&C доступа к корректировке быть не должно"
+    assert not await IsOwner()(Event(555)), "у участника доступа быть не должно"
+    print("manual results ok")
+
+
 async def check_report_edge_cases() -> None:
     """Два случая, на которых участник терял работу: перезапуск и альбом фото."""
     import datetime
@@ -685,6 +764,7 @@ async def main() -> None:
     await check_pc_can_moderate()
     await check_missing_user_buttons()
     await check_report_edge_cases()
+    await check_manual_results()
 
     # Служебный HTTP: хостинг проверяет живость этим адресом, интерфейса больше нет.
     client = TestClient(app)

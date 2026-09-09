@@ -31,3 +31,12 @@ class AdminFlow(StatesGroup):
     bind_channel = State()
     user_search = State()
     team_rename = State()
+
+
+class ResultsFlow(StatesGroup):
+    """Ручная корректировка результатов: /addresult (только владелец бота)."""
+
+    amount = State()      # сколько баллов начислить или списать
+    reason = State()      # за что — участник это увидит
+    revoke_reason = State()
+    search = State()

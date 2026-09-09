@@ -258,6 +258,76 @@ def sub_cancel_confirm_kb(sub: Submission) -> InlineKeyboardMarkup:
     return kb.as_markup()
 
 
+# ---------- /addresult: ручная корректировка (только владелец) ----------
+
+def results_root_kb() -> InlineKeyboardMarkup:
+    kb = InlineKeyboardBuilder()
+    kb.row(_btn("👤 Выбрать участника", "res:users:0", style="primary"))
+    kb.row(_btn("🏷 Выбрать команду", "res:teams"))
+    kb.row(_btn("🧾 Последние начисления", "res:log"))
+    kb.row(_btn("⬅️ В меню", "menu"))
+    return kb.as_markup()
+
+
+def results_users_kb(users: list[User], points: dict[int, int], page: int = 0, per: int = 8) -> InlineKeyboardMarkup:
+    kb = InlineKeyboardBuilder()
+    chunk = users[page * per : page * per + per]
+    for u in chunk:
+        kb.row(_btn(f"{u.display_name[:28]} · {points.get(u.id, 0)} б.", f"res:user:{u.id}"))
+    nav = []
+    if page > 0:
+        nav.append(_btn("⬅️", f"res:users:{page - 1}"))
+    if (page + 1) * per < len(users):
+        nav.append(_btn("➡️", f"res:users:{page + 1}"))
+    if nav:
+        kb.row(*nav)
+    kb.row(_btn("🔍 Найти участника", "res:find"))
+    kb.row(_btn("⬅️ Назад", "res"))
+    return kb.as_markup()
+
+
+def results_user_kb(user: User, subs: list[Submission]) -> InlineKeyboardMarkup:
+    kb = InlineKeyboardBuilder()
+    kb.row(_btn("➕ Начислить баллы", f"res:add:{user.id}", style="primary"),
+           _btn("➖ Списать баллы", f"res:sub:{user.id}"))
+    for x in subs:
+        if x.status == SubmissionStatus.approved:
+            kb.row(_btn(f"↩️ Отменить зачёт №{x.task.code} (+{x.points_awarded})", f"res:revoke:{x.id}"))
+    kb.row(_btn("🗑 Обнулить результаты участника", f"res:wipe_user:{user.id}"))
+    kb.row(_btn("⬅️ Участники", "res:users:0"), _btn("🛠 Раздел", "res"))
+    return kb.as_markup()
+
+
+def results_teams_kb(rows: list[dict]) -> InlineKeyboardMarkup:
+    kb = InlineKeyboardBuilder()
+    for r in rows:
+        t: Team = r["team"]
+        kb.row(_btn(f"{t.emoji} {t.name} · {r['points']} б.", f"res:team:{t.id}"))
+    kb.row(_btn("⬅️ Назад", "res"))
+    return kb.as_markup()
+
+
+def results_team_kb(team: Team, members: list[User]) -> InlineKeyboardMarkup:
+    kb = InlineKeyboardBuilder()
+    for m in members:
+        kb.row(_btn(f"👤 {m.display_name[:30]}", f"res:user:{m.id}"))
+    kb.row(_btn("🗑 Обнулить результаты команды", f"res:wipe_team:{team.id}"))
+    kb.row(_btn("⬅️ Команды", "res:teams"), _btn("🛠 Раздел", "res"))
+    return kb.as_markup()
+
+
+def results_confirm_kb(action: str, target_id: int, back: str) -> InlineKeyboardMarkup:
+    """Подтверждение необратимого действия: обнуления результатов."""
+    kb = InlineKeyboardBuilder()
+    kb.row(_btn("🗑 Да, обнулить", f"res:{action}_ok:{target_id}"))
+    kb.row(_btn("⬅️ Отмена", back))
+    return kb.as_markup()
+
+
+def results_back_kb(cb: str = "res") -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[[_btn("⬅️ Раздел корректировки", cb)]])
+
+
 # ---------- admin ----------
 
 def admin_menu_kb(pending: int, applications: int = 0) -> InlineKeyboardMarkup:

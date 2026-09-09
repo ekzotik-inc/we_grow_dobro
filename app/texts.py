@@ -855,6 +855,95 @@ def push_deleted() -> str:
     )
 
 
+# ---------- /addresult: ручная корректировка результатов (только владелец) ----------
+
+def results_root(total_points: int, approved: int, with_points: int) -> str:
+    return (
+        "🛠 <b>Ручная корректировка</b>\n"
+        "<i>раздел владельца бота</i>\n\n"
+        + row("⭐", "Начислено всего", num(total_points)) + "\n"
+        + row("✅", "Зачтено отчётов", str(approved)) + "\n"
+        + row("👤", "Участников с баллами", str(with_points)) + "\n\n"
+        "Выберите участника или команду — увижу всё, что они отправляли, и смогу\n"
+        "изменить баллы, отменить зачёт или обнулить результаты."
+    )
+
+
+def results_user(user: User, subs: list[Submission], total: int) -> str:
+    lines = [f"👤 <b>{e(user.display_name)}</b>",
+             f"<i>{e(user.team.name) if user.team else 'без команды'}</i>", ""]
+    lines.append(row("⭐", "Итого баллов", num(total)))
+    if user.manual_points:
+        sign = "+" if user.manual_points > 0 else ""
+        lines.append(row("✍️", "Ручная корректировка", f"{sign}{num(user.manual_points)}"))
+    lines.append("")
+    live = [x for x in subs if x.status != SubmissionStatus.cancelled]
+    if not live:
+        lines.append("<i>Отчётов ещё не было.</i>")
+    else:
+        lines.append(rule("Отчёты"))
+        for x in live:
+            mark = f" · <b>+{x.points_awarded}</b>" if x.points_awarded else ""
+            lines.append(f"{STATUS_ICON[x.status]} нед.{x.week} №{x.task.code} {e(x.task.title[:34])}"
+                         f" — {STATUS_LABEL[x.status]}{mark}")
+    return "\n".join(lines)
+
+
+def results_team(team: Team, members: list[User], points: dict[int, int], total: int) -> str:
+    lines = [f"{e(team.emoji)} <b>{e(team.name)}</b>", ""]
+    lines.append(row("⚡", "Баллы команды", num(total)))
+    lines.append(row("👥", "Участников", str(len(members))))
+    lines.append("")
+    lines.append(rule("Кто сколько принёс"))
+    for m in sorted(members, key=lambda x: -points.get(x.id, 0)):
+        lines.append(f"· {e(m.display_name)} — <b>{num(points.get(m.id, 0))}</b> б.")
+    return "\n".join(lines)
+
+
+def results_log(entries: list) -> str:
+    lines = ["🧾 <b>Последние начисления</b>", "<i>что и кому меняли</i>", ""]
+    if not entries:
+        lines.append("<i>Пока пусто.</i>")
+    for entry, user in entries:
+        who = e(user.display_name) if user else "—"
+        sign = "+" if entry.delta > 0 else ""
+        when = entry.created_at.strftime("%d.%m %H:%M") if entry.created_at else ""
+        lines.append(f"<b>{sign}{entry.delta}</b> · {who}\n<i>{e(entry.reason)} · {when}</i>")
+    return "\n".join(lines)
+
+
+def push_points_adjusted(delta: int, reason: str, total: int) -> str:
+    """Участник должен понимать, откуда изменение баллов."""
+    if delta > 0:
+        head = f"⭐ <b>Начислено {num(delta)} б.</b>"
+        line = "Баллы уже в твоём счёте и в командном зачёте."
+    else:
+        head = f"➖ <b>Списано {num(abs(delta))} б.</b>"
+        line = "Счёт пересчитан — изменения видны в «Мой вклад»."
+    return (
+        f"{head}\n\n{e(reason)}\n\n"
+        + row("⭐", "Теперь у тебя", num(total)) + "\n\n"
+        + voice(line + "\nЕсли что-то не сходится — загляни в «Помощь», разберёмся.")
+    )
+
+
+def push_review_revoked(task_title: str, points: int, reason: str) -> str:
+    return (
+        f"↩️ <b>Зачёт отменён</b>\n{e(task_title)}\n\n"
+        + row("➖", "Снято баллов", num(points)) + "\n"
+        + f"Причина: <i>{e(reason)}</i>\n\n"
+        + voice("Это поправимо: пока неделя идёт, отчёт можно переделать и отправить снова.")
+    )
+
+
+def push_results_cleared(points: int) -> str:
+    return (
+        "🗑 <b>Результаты обнулены</b>\n\n"
+        + row("➖", "Снято баллов", num(points)) + "\n\n"
+        + voice("Отчёты можно отправить заново — задания открытых недель на месте.")
+    )
+
+
 def push_disqualified(reason: str) -> str:
     return (
         f"{px('blocked')} <b>Ты снят с марафона</b>\n"

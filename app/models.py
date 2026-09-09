@@ -56,6 +56,8 @@ class User(Base):
     rules_accepted_at: Mapped[datetime | None] = mapped_column(DateTime)
     disqualified_reason: Mapped[str | None] = mapped_column(Text)
     reject_reason: Mapped[str | None] = mapped_column(Text)
+    # Ручная корректировка баллов владельцем бота (/addresult). Может быть отрицательной.
+    manual_points: Mapped[int] = mapped_column(Integer, default=0)
     reg_message_id: Mapped[int | None] = mapped_column(Integer)  # card in the registration channel
     moderated_by: Mapped[int | None] = mapped_column(BigInteger)  # tg_id of the P&C who decided
     moderated_at: Mapped[datetime | None] = mapped_column(DateTime)

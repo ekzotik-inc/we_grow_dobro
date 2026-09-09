@@ -261,6 +261,81 @@ async def delete_user(s, user: User) -> dict:
     return {"tg_id": tg_id, "name": name, "submissions": len(subs), "points": points}
 
 
+# ---------- ручная корректировка результатов (/addresult, только владелец) ----------
+
+async def adjust_points(s, user: User, delta: int, reason: str, actor_tg_id: int) -> int:
+    """Начислить или списать баллы вручную. Возвращает новый итог участника."""
+    if delta == 0:
+        raise ServiceError("Нечего менять: укажите число, отличное от нуля.")
+    user.manual_points = int(user.manual_points or 0) + delta
+    s.add(PointsLog(user_id=user.id, submission_id=None, delta=delta,
+                    reason=reason[:200] or "ручная корректировка", actor_tg_id=actor_tg_id))
+    await s.flush()
+    return await user_points(s, user.id)
+
+
+async def revoke_review(s, sub: Submission, actor_tg_id: int, reason: str) -> int:
+    """Отменить зачёт отчёта: баллы снимаются, участник может переделать работу."""
+    if sub.status != SubmissionStatus.approved:
+        raise ServiceError("Этот отчёт не был зачтён.")
+    returned = sub.points_awarded
+    s.add(PointsLog(user_id=sub.user_id, submission_id=sub.id, delta=-returned,
+                    reason=f"отмена зачёта: {reason}"[:200], actor_tg_id=actor_tg_id))
+    sub.status = SubmissionStatus.rejected
+    sub.points_awarded = 0
+    sub.review_comment = reason[:300]
+    sub.reviewed_by = actor_tg_id
+    sub.reviewed_at = datetime.utcnow()
+    await s.flush()
+    return returned
+
+
+async def clear_user_results(s, user: User, actor_tg_id: int) -> dict:
+    """Полностью обнулить результаты участника: отчёты, баллы и ручные корректировки."""
+    subs = list((await s.execute(select(Submission).where(Submission.user_id == user.id))).scalars())
+    before = await user_points(s, user.id)
+    await s.execute(delete(PointsLog).where(PointsLog.user_id == user.id))
+    await s.execute(delete(Submission).where(Submission.user_id == user.id))
+    user.manual_points = 0
+    s.add(PointsLog(user_id=user.id, submission_id=None, delta=-before,
+                    reason="обнуление результатов", actor_tg_id=actor_tg_id))
+    await s.flush()
+    return {"submissions": len(subs), "points": before}
+
+
+async def clear_team_results(s, team: Team, actor_tg_id: int) -> dict:
+    """Обнулить результаты всей команды — каждому участнику по отдельности.
+
+    Состав берём запросом, а не через связь: после первых удалений связь устаревает,
+    и обращение к ней падает посреди операции.
+    """
+    members = list(
+        (await s.execute(
+            select(User).where(User.team_id == team.id, User.status != UserStatus.disqualified)
+        )).scalars()
+    )
+    total = {"members": 0, "submissions": 0, "points": 0}
+    for member in members:
+        info = await clear_user_results(s, member, actor_tg_id)
+        total["members"] += 1
+        total["submissions"] += info["submissions"]
+        total["points"] += info["points"]
+    await s.flush()
+    return total
+
+
+async def recent_points_log(s, limit: int = 15) -> list[tuple[PointsLog, User | None]]:
+    """Последние начисления и списания — журнал для владельца."""
+    rows = (
+        await s.execute(select(PointsLog).order_by(PointsLog.id.desc()).limit(limit))
+    ).scalars()
+    out = []
+    for entry in rows:
+        user = (await s.execute(select(User).where(User.id == entry.user_id))).scalar_one_or_none()
+        out.append((entry, user))
+    return out
+
+
 async def disqualify(s, user: User, reason: str, actor_tg_id: int) -> None:
     user.status = UserStatus.disqualified
     user.disqualified_reason = reason
@@ -682,13 +757,18 @@ async def review_submission(s, sub: Submission, approve: bool, reviewer_tg_id: i
 # ---------- scoring ----------
 
 async def user_points(s, user_id: int) -> int:
-    return (
+    """Баллы участника: зачтённые отчёты плюс ручная корректировка владельца (/addresult)."""
+    earned = (
         await s.execute(
             select(func.coalesce(func.sum(Submission.points_awarded), 0)).where(
                 Submission.user_id == user_id, Submission.status == SubmissionStatus.approved
             )
         )
     ).scalar_one()
+    manual = (
+        await s.execute(select(func.coalesce(User.manual_points, 0)).where(User.id == user_id))
+    ).scalar_one_or_none() or 0
+    return int(earned) + int(manual)
 
 
 async def team_points_map(s) -> dict[int, int]:
@@ -703,7 +783,16 @@ async def team_points_map(s) -> dict[int, int]:
         )
         .group_by(User.team_id)
     )
-    return {tid: int(pts) for tid, pts in rows}
+    points = {tid: int(pts) for tid, pts in rows}
+    # Ручные корректировки идут в командный зачёт так же, как зачтённые отчёты.
+    manual = await s.execute(
+        select(User.team_id, func.coalesce(func.sum(User.manual_points), 0))
+        .where(User.status == UserStatus.registered, User.team_id.is_not(None), User.manual_points != 0)
+        .group_by(User.team_id)
+    )
+    for tid, delta in manual:
+        points[tid] = points.get(tid, 0) + int(delta or 0)
+    return points
 
 
 async def leaderboard(s) -> list[dict]:
@@ -723,7 +812,11 @@ async def user_points_map(s) -> dict[int, int]:
         .where(Submission.status == SubmissionStatus.approved)
         .group_by(Submission.user_id)
     )
-    return {uid: int(p) for uid, p in rows}
+    points = {uid: int(p) for uid, p in rows}
+    manual = await s.execute(select(User.id, User.manual_points).where(User.manual_points != 0))
+    for uid, delta in manual:
+        points[uid] = points.get(uid, 0) + int(delta or 0)
+    return points
 
 
 async def week_stats_for_user(s, user_id: int, week: int) -> dict:
