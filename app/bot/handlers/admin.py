@@ -25,13 +25,15 @@ router = Router(name="admin")
 
 
 class IsAdmin:
+    """Панель открыта только тем, кто перечислен в ADMIN_IDS или PC_IDS.
+
+    Флаг в базе намеренно не учитывается: он лишь отражает эти списки, и однажды
+    выставленный (например, при другой настройке) не должен открывать панель навсегда.
+    """
+
     async def __call__(self, event) -> bool:
         uid = event.from_user.id if event.from_user else 0
-        if settings.is_admin(uid):
-            return True
-        async with session() as s:
-            u = await services.get_user(s, uid)
-            return bool(u and u.is_admin)
+        return settings.is_admin(uid)
 
 
 router.message.filter(IsAdmin())

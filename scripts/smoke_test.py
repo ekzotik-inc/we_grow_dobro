@@ -77,6 +77,27 @@ async def fill_steps(s, sub) -> None:
             await services.add_file(s, sub, {"type": "photo", "file_id": f"f{sub.id}-{i}", "name": None}, step=i)
 
 
+def check_admin_access() -> None:
+    """Панель открыта только по спискам ADMIN_IDS / PC_IDS, флаг в базе прав не даёт."""
+    assert settings.is_admin(999), "админ из ADMIN_IDS должен иметь доступ"
+    assert not settings.is_admin(555), "обычный участник не должен иметь доступ"
+
+
+async def check_admin_flag_reset() -> None:
+    """Флаг админа, оставшийся в базе от прежних настроек, снимается при следующем входе."""
+    async with SessionLocal() as s:
+        u = await services.get_or_create_user(s, 6161, "stale")
+        u.is_admin = True
+        u.is_pc = True
+        await s.commit()
+        u = await services.get_or_create_user(s, 6161, "stale")
+        await s.commit()
+        assert not u.is_admin and not u.is_pc, "лишние права должны сниматься сами"
+        await services.delete_user(s, u)
+        await s.commit()
+    print("admin access ok")
+
+
 async def check_user_delete() -> None:
     """Админ может удалить участника полностью — тот регистрируется заново с нуля."""
     async with SessionLocal() as s:
@@ -389,6 +410,8 @@ async def main() -> None:
     await check_week_switch()
     await check_registration_resume()
     await check_user_delete()
+    check_admin_access()
+    await check_admin_flag_reset()
 
     # Служебный HTTP: хостинг проверяет живость этим адресом, интерфейса больше нет.
     client = TestClient(app)

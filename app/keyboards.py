@@ -105,7 +105,8 @@ def main_menu_kb(user: User, pending: int = 0) -> InlineKeyboardMarkup:
 
     kb.row(_btn("⚡ Мой вклад", "me"), _btn("🏆 Рейтинг", "top"))
     kb.row(_btn("📖 Правила", "rules"), _btn("💬 Помощь", "help"))
-    if user.is_admin:
+    # Кнопка панели — по тому же правилу, что и доступ к ней: только ADMIN_IDS / PC_IDS.
+    if settings.is_admin(user.tg_id):
         kb.row(_btn("🛠 Панель P&C" + (f" · {pending}" if pending else ""), "adm"))
     return kb.as_markup()
 

@@ -8,6 +8,7 @@ from aiogram.types import CallbackQuery, Message, ReplyKeyboardRemove
 
 from ... import keyboards as kb
 from ... import services, texts
+from ...config import settings
 from ...models import UserStatus
 from .. import channels
 from ..common import ANCHOR_KEY, answer_cq, delete_quietly, edit, edit_anchor, load_user, remember_anchor, session
@@ -38,7 +39,7 @@ async def render_menu(s, user) -> tuple[str, object]:
         [x for x in await services.user_submissions(s, user.id) if x.status.value == "approved"]
     )
     ws["my_rank"], ws["total_users"] = await services.participant_rank(s, user.id)
-    pending = await services.pending_count(s) if user.is_admin else 0
+    pending = await services.pending_count(s) if settings.is_admin(user.tg_id) else 0
     return texts.main_menu(user, my_points, team_points, rank, ws), kb.main_menu_kb(user, pending)
 
 
@@ -122,12 +123,35 @@ async def reg_name(message: Message, state: FSMContext) -> None:
                           texts.registration_step("full_name", draft) + "\n\n⚠️ Нужны имя и фамилия, от 3 символов.",
                           kb.reg_kb("full_name"))
         return
+    if _looks_like_phone(name):
+        # Иначе присланный заранее номер записался бы именем, а телефон бот спросил бы снова —
+        # именно так и терялась первая попытка.
+        phone = _clean_phone(name)
+        if phone:
+            async with session() as s:
+                user = await load_user(s, message.from_user)
+                await services.save_draft(s, user, phone=phone)
+                await s.commit()
+            draft["phone"] = phone
+            await state.update_data(draft=draft)
+        await edit_anchor(message.bot, message.chat.id, state,
+                          texts.registration_step("full_name", draft)
+                          + "\n\n⚠️ Это похоже на номер — я его сохранил. Сначала напиши имя и фамилию.",
+                          kb.reg_kb("full_name"))
+        return
     draft["full_name"] = name
     async with session() as s:
         user = await load_user(s, message.from_user)
         await services.save_draft(s, user, full_name=name)
         await s.commit()
+        known_phone = user.phone
     await state.update_data(draft=draft)
+    if known_phone:
+        # Номер участник прислал раньше — второй раз не спрашиваем.
+        draft["phone"] = known_phone
+        await state.update_data(draft=draft)
+        await _phone_accepted(message, state, known_phone)
+        return
     await state.set_state(Registration.phone)
     await edit_anchor(message.bot, message.chat.id, state, texts.registration_step("phone", draft), kb.reg_kb("phone"))
     # A reply keyboard is the only way to offer Telegram's "share my number" button.
@@ -135,6 +159,13 @@ async def reg_name(message: Message, state: FSMContext) -> None:
                                   "С компьютера просто напиши номер сообщением.",
                                   reply_markup=kb.phone_request_kb())
     await state.update_data(phone_prompt_id=prompt.message_id)
+
+
+def _looks_like_phone(raw: str) -> bool:
+    """Строка из цифр, плюса, скобок и дефисов — это номер, а не имя."""
+    digits = [c for c in raw if c.isdigit()]
+    extra = [c for c in raw if not c.isdigit() and c not in "+-() "]
+    return len(digits) >= 10 and not extra
 
 
 def _clean_phone(raw: str) -> str | None:
@@ -166,11 +197,35 @@ async def _phone_accepted(message: Message, state: FSMContext, phone: str) -> No
                       texts.registration_step("team", draft), kb.reg_team_kb(rows))
 
 
+@router.message(Registration.full_name, F.contact)
 @router.message(Registration.phone, F.contact)
+@router.message(Registration.team, F.contact)
+@router.message(Registration.confirm, F.contact)
 async def reg_phone_contact(message: Message, state: FSMContext) -> None:
-    phone = message.contact.phone_number
+    """Номер принимаем на любом шаге анкеты: участник часто делится им заранее."""
+    phone = message.contact.phone_number if message.contact else ""
     await delete_quietly(message)
-    await _phone_accepted(message, state, phone if phone.startswith("+") else f"+{phone}")
+    if not phone:
+        return
+    phone = phone if phone.startswith("+") else f"+{phone}"
+    async with session() as s:
+        user = await load_user(s, message.from_user)
+        await services.save_draft(s, user, phone=phone)
+        await s.commit()
+        has_name = bool(user.full_name)
+    data = await state.get_data()
+    draft = dict(data.get("draft", {}))
+    draft["phone"] = phone
+    await state.update_data(draft=draft)
+    if not has_name:
+        # Имя ещё не введено — остаёмся на первом шаге, но номер уже сохранён.
+        await edit_anchor(message.bot, message.chat.id, state,
+                          texts.registration_step("full_name", draft)
+                          + "\n\n✅ Номер сохранил. Осталось имя и фамилия.",
+                          kb.reg_kb("full_name"))
+        await state.set_state(Registration.full_name)
+        return
+    await _phone_accepted(message, state, phone)
 
 
 @router.message(Registration.phone, F.text)

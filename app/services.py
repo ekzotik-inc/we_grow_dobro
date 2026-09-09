@@ -78,12 +78,16 @@ async def get_or_create_user(s, tg_id: int, username: str | None) -> User:
         if username != user.username:
             user.username = username
             changed = True
-        if settings.is_admin(tg_id) and not user.is_admin:
-            user.is_admin = True
-            changed = True
-        if settings.is_pc(tg_id) and not user.is_pc:
-            user.is_pc = True
-            changed = True
+        # Права всегда берутся из ADMIN_IDS / PC_IDS: флаг в базе только отражает список,
+        # а не даёт доступ сам по себе. Иначе однажды выставленный флаг остаётся навсегда.
+        # Исключение — пустой ADMIN_IDS: тогда никого не разжалуем, чтобы не остаться без панели.
+        if settings.admin_ids:
+            if user.is_admin != settings.is_admin(tg_id):
+                user.is_admin = settings.is_admin(tg_id)
+                changed = True
+            if user.is_pc != settings.is_pc(tg_id):
+                user.is_pc = settings.is_pc(tg_id)
+                changed = True
         if changed:
             await s.flush()
     return user
