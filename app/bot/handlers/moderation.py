@@ -18,9 +18,15 @@ from ...models import UserStatus
 from .. import channels
 from ..common import ANCHOR_KEY, answer_cq, delete_quietly, edit, edit_anchor, session
 from ..states import AdminFlow
+from .admin import IsAdmin
 
 log = logging.getLogger(__name__)
 router = Router(name="moderation")
+
+# Карточки заявок и отчётов живут в каналах, где их видят все участники канала.
+# Решение принимают только владелец бота и сотрудники P&C — фильтр тот же, что у панели.
+router.callback_query.filter(IsAdmin())
+router.message.filter(IsAdmin())
 
 
 async def is_admin(tg_id: int) -> bool:

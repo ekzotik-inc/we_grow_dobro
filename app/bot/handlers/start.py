@@ -274,7 +274,7 @@ async def _resume_registration(message: Message, state: FSMContext) -> bool:
     return True
 
 
-@fallback_router.callback_query(F.data.startswith("adm:") | (F.data == "adm"))
+@fallback_router.callback_query(F.data.startswith("adm:") | (F.data == "adm") | F.data.startswith("mod:"))
 async def stray_admin_click(cq: CallbackQuery, state: FSMContext) -> None:
     """Старые сообщения с кнопкой панели остаются в чатах участников.
 

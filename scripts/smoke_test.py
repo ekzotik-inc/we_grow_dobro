@@ -147,12 +147,68 @@ async def check_admin_router_blocks() -> None:
         await dp.feed_update(bot, update)
         assert not any(h.startswith("admin.") for h in seen), f"участник попал в панель: {seen}"
 
+    for update in (callback_update(stranger, "mod:ok:1"), callback_update(stranger, "mod:rej:1")):
+        seen.clear()
+        await dp.feed_update(bot, update)
+        assert not any(h.startswith("moderation.") for h in seen), f"участник модерирует заявки: {seen}"
+
     for staff in sorted(settings.admin_ids | settings.pc_ids):
         seen.clear()
         await dp.feed_update(bot, message_update(staff, "/admin"))
         assert seen == ["admin.cmd_admin"], f"сотрудник {staff} не попал в панель: {seen}"
+        for data, expected in (("mod:ok:1", "moderation.cb_mod_approve"),
+                               ("mod:rej:1", "moderation.cb_mod_reject"),
+                               ("adm:ok:1", "admin.cb_approve"),
+                               ("adm:rej:1", "admin.cb_reject")):
+            seen.clear()
+            await dp.feed_update(bot, callback_update(staff, data))
+            assert seen == [expected], f"сотруднику {staff} недоступно {data}: {seen}"
     await bot.session.close()
     print("admin router ok")
+
+
+async def check_pc_can_moderate() -> None:
+    """Сотрудник P&C принимает заявки и проверяет отчёты наравне с админом."""
+    pc_id = sorted(settings.pc_ids)[0]
+    async with SessionLocal() as s:
+        pc = await services.get_or_create_user(s, pc_id, "pc")
+        await s.commit()
+        assert pc.is_pc, "сотрудник из PC_IDS должен быть отмечен в базе"
+        assert pc_id in await services.list_pc_tg_ids(s), "заявки и вопросы должны приходить P&C"
+
+        u = await services.get_or_create_user(s, 7070, "moderated")
+        await services.register_user(s, u, "Проверяемый Участник", "IT", "Ташкент")
+        await s.commit()
+        assert u.status == UserStatus.pending
+        await services.approve_user(s, u, pc_id)      # «Принять» из канала заявок
+        await s.commit()
+        assert u.status == UserStatus.registered and u.moderated_by == pc_id
+
+        task = (await services.list_tasks(s, 1))[0]
+        sub = await services.start_submission(s, u, task, None)
+        await fill_steps(s, sub)
+        await services.send_for_review(s, sub)
+        await s.commit()
+        sub = await services.get_submission(s, sub.id)
+        await services.review_submission(s, sub, True, pc_id)   # «Зачесть» из канала результатов
+        await s.commit()
+        sub = await services.get_submission(s, sub.id)
+        assert sub.status == SubmissionStatus.approved and sub.reviewed_by == pc_id
+        assert await services.user_points(s, u.id) == sub.points_awarded > 0
+
+        sub2 = await services.start_submission(s, u, (await services.list_tasks(s, 1))[1], None)
+        await fill_steps(s, sub2)
+        await services.send_for_review(s, sub2)
+        await s.commit()
+        sub2 = await services.get_submission(s, sub2.id)
+        await services.review_submission(s, sub2, False, pc_id, "нужно фото передачи")
+        await s.commit()
+        sub2 = await services.get_submission(s, sub2.id)
+        assert sub2.status == SubmissionStatus.rejected and sub2.points_awarded == 0
+
+        await services.delete_user(s, u)
+        await s.commit()
+    print("P&C moderation ok")
 
 
 async def check_admin_flag_reset() -> None:
@@ -492,6 +548,7 @@ async def main() -> None:
     check_admin_access()
     await check_admin_flag_reset()
     await check_admin_router_blocks()
+    await check_pc_can_moderate()
 
     # Служебный HTTP: хостинг проверяет живость этим адресом, интерфейса больше нет.
     client = TestClient(app)
