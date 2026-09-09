@@ -39,6 +39,8 @@ services:
         value: "1"
       - key: VOICE_NAME      # имя, от которого бот говорит в цитатах
         value: "Добрик"
+      - key: DB_KEEPALIVE_MINUTES  # 4 — база не засыпает; 0 — не будить (экономия квоты Neon)
+        value: "4"
       - key: MOTIVATION_HOUR   # час мотивирующего сообщения (через день)
         value: "11"
       - key: TOP_HOUR          # час публикации топа (среда и воскресенье)

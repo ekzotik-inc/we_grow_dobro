@@ -117,11 +117,12 @@ async def keepalive_job(bot: Bot) -> None:
     усыпляет базу уже через пять минут простоя. Разбудить базу первым же действием участника —
     значит заставить его ждать и, в худшем случае, получить ошибку вместо ответа.
     """
-    async with SessionLocal() as s:
-        try:
-            await s.execute(text("SELECT 1"))
-        except Exception as ex:  # noqa: BLE001
-            log.warning("keepalive: база не ответила: %s", ex)
+    if settings.db_keepalive_minutes > 0:
+        async with SessionLocal() as s:
+            try:
+                await s.execute(text("SELECT 1"))
+            except Exception as ex:  # noqa: BLE001
+                log.warning("keepalive: база не ответила: %s", ex)
     if not settings.external_url:
         return
     url = f"{settings.external_url}/api/health"
@@ -141,8 +142,10 @@ def build_scheduler(bot: Bot) -> AsyncIOScheduler:
     sch.add_job(admin_digest_job, CronTrigger(hour=18, minute=0), args=[bot], id="digest")
     sch.add_job(motivation_job, CronTrigger(hour=settings.motivation_hour, minute=0), args=[bot], id="motivation")
     sch.add_job(top_digest_job, CronTrigger(hour=settings.top_hour, minute=0), args=[bot], id="top")
-    # Каждые 4 минуты: Neon засыпает после пяти минут простоя.
-    sch.add_job(keepalive_job, IntervalTrigger(minutes=4), args=[bot], id="keepalive")
-    log.info("keepalive включён: база каждые 4 минуты%s",
-             f", сервис — {settings.external_url}/api/health" if settings.external_url else "")
+    # Интервал по самому частому засыпанию: база — 5 минут, сервис — 15.
+    minutes = settings.db_keepalive_minutes or 10
+    sch.add_job(keepalive_job, IntervalTrigger(minutes=minutes), args=[bot], id="keepalive")
+    log.info("keepalive каждые %s мин: база — %s, сервис — %s", minutes,
+             "да" if settings.db_keepalive_minutes else "нет (спит, экономим квоту)",
+             settings.external_url or "нет")
     return sch

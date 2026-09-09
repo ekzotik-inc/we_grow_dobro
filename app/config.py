@@ -108,6 +108,9 @@ class Settings:
     phone_country_code: str = os.getenv("PHONE_COUNTRY_CODE", "998").strip().lstrip("+")
     announce_hour: int = int(os.getenv("ANNOUNCE_HOUR", "10"))
     reminder_hour: int = int(os.getenv("REMINDER_HOUR", "12"))
+    # Как часто трогать базу, чтобы не засыпала. 0 — не трогать: на бесплатном тарифе Neon
+    # круглосуточная активность съедает месячную квоту примерно за две недели.
+    db_keepalive_minutes: int = int(os.getenv("DB_KEEPALIVE_MINUTES", "4"))
     motivation_hour: int = int(os.getenv("MOTIVATION_HOUR", "11"))   # nudge every other day
     top_hour: int = int(os.getenv("TOP_HOUR", "19"))                 # standings, Wed and Sun
     # If set, the week is forced (useful for testing before the marathon starts). 0 = auto.
