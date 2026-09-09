@@ -628,6 +628,15 @@ async def segment_users(s, code: str, arg: str | None = None) -> list[User]:
     return []
 
 
+async def task_number(s, task: Task) -> int:
+    """Порядковый номер задания внутри своей недели: «Задание 1» … «Задание 4»."""
+    week_tasks = [t for t in await list_tasks(s) if t.week == task.week]
+    for i, t in enumerate(week_tasks, 1):
+        if t.id == task.id:
+            return i
+    return 1
+
+
 async def participant_rank(s, user_id: int) -> tuple[int | None, int]:
     """(place in the overall standings, number of participants ranked). Ties share a place."""
     points = await user_points_map(s)

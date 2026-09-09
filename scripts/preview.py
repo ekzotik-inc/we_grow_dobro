@@ -64,7 +64,11 @@ async def main():
         subs = {x.task_id: x for x in await services.user_submissions(s, u.id)}
         show("ЗАДАНИЯ НЕДЕЛИ", texts.tasks_list(1, tasks, subs), kb.week_tabs_kb(1, tasks, subs))
         topt = next(x for x in tasks if x.options)
-        show("ЗАДАНИЕ С ВЫБОРОМ", texts.task_card(topt, None), kb.task_card_kb(topt, None, True, u))
+        show("ЗАДАНИЕ С ВЫБОРОМ", texts.task_card(topt, None, 4), kb.task_card_kb(topt, None, True, u))
+        show("КОМАНДЫ", texts.teams_list(rows, u), kb.teams_kb(rows, u))
+        show("МОЯ КОМАНДА", texts.team_card(rows[0]["team"], rows[0]["members"], rows[0]["points"], 1,
+                                            await services.user_points_map(s), u), kb.team_card_kb(rows[0]["team"], u, False))
+        show("ЗАДАНИЕ ОБЫЧНОЕ", texts.task_card(tasks[0], None, 1), kb.task_card_kb(tasks[0], None, True, u))
         show("МОЙ ВКЛАД", texts.my_results(u, await services.user_submissions(s, u.id), pts))
         show("РЕЙТИНГ", texts.leaderboard_text(rows))
         show("АНОНС НЕДЕЛИ", texts.week_announce(1, tasks))

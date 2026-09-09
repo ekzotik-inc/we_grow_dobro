@@ -49,11 +49,15 @@ async def render_admin(s):
     reg_ch = await services.get_channel_id(s, "reg_channel_id")
     res_ch = await services.get_channel_id(s, "results_channel_id")
     participants = len([u for u in await services.list_participants(s) if u.status == UserStatus.registered])
-    lines = ["🛠 <b>Панель P&C</b>", ""]
-    lines.append(f"🙋 Заявок на модерации: <b>{apps}</b>")
-    lines.append(f"🔎 Отчётов на проверке: <b>{pending}</b>")
-    lines.append(f"👤 Принятых участников: <b>{participants}</b>")
-    lines.append(f"🗓 Неделя: <b>{cw.number if cw else '—'}</b> · марафон {texts.MARATHON_STATUS_TEXT[settings.marathon_status()]}")
+    lines = ["🛠 <b>Панель P&C</b>",
+             f"<i>марафон {texts.MARATHON_STATUS_TEXT[settings.marathon_status()]}"
+             + (f" · неделя {cw.number}" if cw else "") + "</i>", ""]
+    lines.append(texts.rule("Требует внимания"))
+    lines.append(texts.row("🙋", "Заявок на модерации", str(apps)))
+    lines.append(texts.row("🔎", "Отчётов на проверке", str(pending)))
+    lines.append("")
+    lines.append(texts.rule("Марафон"))
+    lines.append(texts.row("👤", "Принятых участников", str(participants)))
     lines.append("")
     lines.append(("✅" if reg_ch else "⚠️") + " Канал заявок " + (f"<code>{reg_ch}</code>" if reg_ch else "не подключён"))
     lines.append(("✅" if res_ch else "⚠️") + " Канал результатов " + (f"<code>{res_ch}</code>" if res_ch else "не подключён"))

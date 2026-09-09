@@ -196,12 +196,14 @@ def week_tabs_kb(active: int, tasks: list[Task], subs: dict[int, Submission]) ->
     ]
     if tabs:
         kb.row(*tabs)
-    for t in tasks:
+    # The list above already names every task, so the buttons stay short and predictable:
+    # «Задание 1» … «Задание 4», with a status mark when there is something to report.
+    for i, t in enumerate(tasks, 1):
         sub = subs.get(t.id)
-        icon = ""
+        mark = ""
         if sub and sub.status != SubmissionStatus.cancelled:
-            icon = {"draft": "📝", "pending": "⏳", "approved": "✅", "rejected": "❌"}[sub.status.value] + " "
-        kb.row(_btn(f"{icon}{t.emoji} {t.title[:36]} · {t.points_label} б.", f"task:{t.id}"))
+            mark = " · " + {"draft": "📝", "pending": "⏳", "approved": "✅", "rejected": "❌"}[sub.status.value]
+        kb.row(_btn(f"{t.emoji} Задание {i}{mark}", f"task:{t.id}"))
     kb.row(_btn("⬅️ В меню", "menu"))
     return kb.as_markup()
 

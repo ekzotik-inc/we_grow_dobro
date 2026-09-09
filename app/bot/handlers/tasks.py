@@ -77,7 +77,7 @@ async def cb_task(cq: CallbackQuery, state: FSMContext) -> None:
             await answer_cq(cq, "Эта неделя ещё не началась.", alert=True)
             return
         sub = await services.user_submission_for_task(s, user.id, task.id)
-    await edit(cq, texts.task_card(task, sub), kb.task_card_kb(task, sub, services.task_is_open(task), user), task.image)
+    await edit(cq, texts.task_card(task, sub, await services.task_number(s, task)), kb.task_card_kb(task, sub, services.task_is_open(task), user), task.image)
     await answer_cq(cq)
 
 
@@ -278,7 +278,7 @@ async def cb_sub_cancel_ok(cq: CallbackQuery, state: FSMContext) -> None:
         task = await services.get_task(s, sub.task_id)
         sub = await services.get_submission(s, sub.id)
     await state.clear()
-    await edit(cq, texts.task_card(task, sub), kb.task_card_kb(task, sub, services.task_is_open(task), user), task.image)
+    await edit(cq, texts.task_card(task, sub, await services.task_number(s, task)), kb.task_card_kb(task, sub, services.task_is_open(task), user), task.image)
     await answer_cq(cq, "Отчёт отменён")
 
 
