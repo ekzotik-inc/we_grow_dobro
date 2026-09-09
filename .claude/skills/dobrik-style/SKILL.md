@@ -117,6 +117,13 @@ row("⭐", "Мои баллы", num(points), f"место #{rank} из {total}")
 После правки текстов:
 
 ```bash
-python -m scripts.preview      # прочитать все экраны глазами
-python -m scripts.smoke_test   # эмодзи, лимиты, обработчики кнопок
+python -m scripts.preview          # прочитать все экраны глазами
+python -m scripts.smoke_test       # бизнес-логика, права, эмодзи, миграции
+python -m scripts.audit_texts      # HTML и лимиты длины на каждом экране
+python -m scripts.audit_callbacks  # все кнопки от имени админа, P&C и участника
+python -m scripts.audit_rules      # правила марафона на живых данных
+python -m scripts.audit_jobs       # каналы, фоновые задачи, экспорт, рассылки
 ```
+
+В текстах сообщений `&` пишется как `&amp;` — это требование Telegram HTML.
+В подписях кнопок, Excel и настройках — обычный `&`: там разметки нет.

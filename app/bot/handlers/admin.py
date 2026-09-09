@@ -55,7 +55,7 @@ async def render_admin(s):
     reg_ch = await services.get_channel_id(s, "reg_channel_id")
     res_ch = await services.get_channel_id(s, "results_channel_id")
     participants = len([u for u in await services.list_participants(s) if u.status == UserStatus.registered])
-    lines = ["🛠 <b>Панель P&C</b>",
+    lines = ["🛠 <b>Панель P&amp;C</b>",
              "<i>" + (f"открыта неделя {cw.number}" if cw else "ни одна неделя не открыта") + "</i>", ""]
     lines.append(texts.rule("Требует внимания"))
     lines.append(texts.row("🙋", "Заявок на модерации", str(apps)))
@@ -67,7 +67,7 @@ async def render_admin(s):
     lines.append(("✅" if reg_ch else "⚠️") + " Канал заявок " + (f"<code>{reg_ch}</code>" if reg_ch else "не подключён"))
     lines.append(("✅" if res_ch else "⚠️") + " Канал результатов " + (f"<code>{res_ch}</code>" if res_ch else "не подключён"))
     if not (reg_ch and res_ch):
-        lines.append("\nБез канала карточки приходят всем P&C в личку. Подключить: «Каналы и настройки».")
+        lines.append("\nБез канала карточки приходят всем P&amp;C в личку. Подключить: «Каналы и настройки».")
     warning = texts.db_expiry_warning()
     if warning:
         lines.append("\n" + warning)
@@ -338,7 +338,7 @@ async def cb_users(cq: CallbackQuery, state: FSMContext) -> None:
     await state.clear()
     parts = cq.data.split(":")
     page = int(parts[2])
-    flt = parts[3] if len(parts) > 3 else "all"
+    flt = parts[3] if len(parts) > 3 and parts[3] in USER_FILTERS else "all"
     async with session() as s:
         users = await services.list_participants(s)
     shown = _filter_users(users, flt)
@@ -413,6 +413,9 @@ async def cb_dq(cq: CallbackQuery, state: FSMContext) -> None:
     uid = int(cq.data.split(":")[2])
     async with session() as s:
         u = await services.get_user_by_id(s, uid)
+        if u is None:
+            await answer_cq(cq, "Участник не найден — возможно, его удалили.", alert=True)
+            return
     await state.set_state(AdminFlow.dq_reason)
     await state.update_data({ANCHOR_KEY: cq.message.message_id, "uid": uid})
     await edit(cq, f"🚫 <b>Дисквалификация {texts.e(u.display_name)}</b>\n\nНапиши причину сообщением (участник её увидит). Его баллы перестанут учитываться в командном зачёте.", kb.cancel_kb(f"adm:user:{uid}"))
@@ -427,6 +430,10 @@ async def dq_reason(message: Message, state: FSMContext) -> None:
     await delete_quietly(message)
     async with session() as s:
         u = await services.get_user_by_id(s, uid)
+        if u is None:
+            await state.clear()
+            await message.answer("Участник не найден — возможно, его удалили.")
+            return
         await services.disqualify(s, u, reason, message.from_user.id)
         await s.commit()
         u = await services.get_user_by_id(s, uid)
@@ -484,6 +491,9 @@ async def cb_reinstate(cq: CallbackQuery) -> None:
     uid = int(cq.data.split(":")[2])
     async with session() as s:
         u = await services.get_user_by_id(s, uid)
+        if u is None:
+            await answer_cq(cq, "Участник не найден — возможно, его удалили.", alert=True)
+            return
         await services.reinstate(s, u, cq.from_user.id)
         await s.commit()
         u = await services.get_user_by_id(s, uid)
@@ -501,6 +511,9 @@ async def cb_move(cq: CallbackQuery) -> None:
     uid = int(cq.data.split(":")[2])
     async with session() as s:
         u = await services.get_user_by_id(s, uid)
+        if u is None:
+            await answer_cq(cq, "Участник не найден — возможно, его удалили.", alert=True)
+            return
         teams = await services.list_teams(s)
     await edit(cq, f"🔀 Перевести <b>{texts.e(u.display_name)}</b> в команду:", kb.move_team_kb(u, teams))
     await answer_cq(cq)
@@ -511,7 +524,10 @@ async def cb_move_to(cq: CallbackQuery) -> None:
     _, _, uid, tid = cq.data.split(":")
     async with session() as s:
         u = await services.get_user_by_id(s, int(uid))
-        old_team = u.team.name if u and u.team else None
+        if u is None:
+            await answer_cq(cq, "Участник не найден — возможно, его удалили.", alert=True)
+            return
+        old_team = u.team.name if u.team else None
         try:
             await services.move_user_to_team(s, u, int(tid) or None)
             await s.commit()
@@ -947,7 +963,8 @@ async def cb_adm_team(cq: CallbackQuery, state: FSMContext) -> None:
                 rank, points = i, r["points"]
         upts = await services.user_points_map(s)
         members = services.team_active_members(team)
-        text = texts.team_card(team, members, points, rank, upts, team)
+        viewer = await services.get_user(s, cq.from_user.id)
+        text = texts.team_card(team, members, points, rank, upts, viewer)
     await edit(cq, text, kb.admin_team_manage_kb(team))
     await answer_cq(cq)
 
@@ -1025,7 +1042,7 @@ async def cb_team_del_ok(cq: CallbackQuery, state: FSMContext) -> None:
         except Exception:  # noqa: BLE001
             pass
     await answer_cq(cq, "Команда удалена")
-    await cb_adm_teams(cq)
+    await cb_adm_teams(cq, state)
 
 
 # ---------- reminders ----------

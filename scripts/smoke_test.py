@@ -167,6 +167,37 @@ async def check_admin_router_blocks() -> None:
     print("admin router ok")
 
 
+async def check_missing_user_buttons() -> None:
+    """Кнопки в старых сообщениях про удалённого участника не должны ронять панель."""
+    from app.bot.handlers import admin as adm
+
+    async with SessionLocal() as s:
+        ghost = await services.get_or_create_user(s, 9999, "ghost")
+        await s.commit()
+        ghost_id = ghost.id
+        await services.delete_user(s, ghost)
+        await s.commit()
+        assert await services.get_user_by_id(s, ghost_id) is None
+
+    answered: list[str] = []
+
+    class FakeCQ:
+        def __init__(self, data): self.data = data; self.from_user = type("U", (), {"id": 1})()
+        message = None
+        async def answer(self, text=None, show_alert=False): answered.append(text or "")
+
+    class FakeState:
+        async def clear(self): pass
+        async def set_state(self, *a): raise AssertionError("не должно дойти до смены состояния")
+        async def update_data(self, *a, **k): raise AssertionError("не должно дойти до записи состояния")
+
+    for data, handler in ((f"adm:dq:{ghost_id}", adm.cb_dq), (f"adm:del:{ghost_id}", adm.cb_user_delete)):
+        answered.clear()
+        await handler(FakeCQ(data), FakeState())
+        assert answered and "не найден" in answered[0].lower(), (data, answered)
+    print("missing user buttons ok")
+
+
 async def check_pc_can_moderate() -> None:
     """Сотрудник P&C принимает заявки и проверяет отчёты наравне с админом."""
     pc_id = sorted(settings.pc_ids)[0]
@@ -549,6 +580,7 @@ async def main() -> None:
     await check_admin_flag_reset()
     await check_admin_router_blocks()
     await check_pc_can_moderate()
+    await check_missing_user_buttons()
 
     # Служебный HTTP: хостинг проверяет живость этим адресом, интерфейса больше нет.
     client = TestClient(app)

@@ -67,7 +67,7 @@ async def notify_pc(bot: Bot, s, text: str, kb=None, exclude: int | None = None)
             await bot.send_message(pc_id, text, reply_markup=kb)
             n += 1
         except Exception as ex:  # noqa: BLE001
-            log.warning("notify P&C %s failed: %s", pc_id, ex)
+            log.warning("notify P&amp;C %s failed: %s", pc_id, ex)
     return n
 
 
@@ -95,7 +95,7 @@ async def post_registration(bot: Bot, s, user: User) -> None:
         if wanted:
             text += f"\n🌱 Просит команду: {wanted.emoji} {wanted.name}"
     else:
-        text += "\n🌱 Команду просит подобрать P&C"
+        text += "\n🌱 Команду просит подобрать P&amp;C"
     markup = kb.moderation_kb(user.id)
     chat_id = await services.get_channel_id(s, "reg_channel_id")
     if chat_id:

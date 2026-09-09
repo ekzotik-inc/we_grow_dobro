@@ -43,7 +43,7 @@ async def _guard(cq: CallbackQuery) -> bool:
     """Anyone can see a channel post; only P&C may press its buttons."""
     if await is_admin(cq.from_user.id):
         return True
-    await answer_cq(cq, "Только для сотрудников P&C 🔒", alert=True)
+    await answer_cq(cq, "Только для сотрудников P&amp;C 🔒", alert=True)
     return False
 
 
@@ -133,8 +133,8 @@ async def do_mod_reject(bot, uid: int, reason: str, actor_tg_id: int):
         await bot.send_message(
             user.tg_id,
             f"❌ <b>Заявка на участие отклонена.</b>\nПричина: <i>{texts.e(reason)}</i>\n\n"
-            "Если это ошибка — напиши сотруднику P&C.",
-            reply_markup=kb.back_kb("help", "🆘 Помощь P&C"),
+            "Если это ошибка — напиши сотруднику P&amp;C.",
+            reply_markup=kb.back_kb("help", "🆘 Помощь P&amp;C"),
         )
     except Exception as ex:  # noqa: BLE001
         log.warning("notify rejected user %s failed: %s", user.tg_id, ex)
@@ -146,7 +146,7 @@ async def cb_mod_reject_reason(cq: CallbackQuery) -> None:
     if not await _guard(cq):
         return
     _, _, uid, code = cq.data.split(":")
-    reason = kb.MOD_REJECT_REASONS.get(code, "Заявка отклонена сотрудником P&C.")
+    reason = kb.MOD_REJECT_REASONS.get(code, "Заявка отклонена сотрудником P&amp;C.")
     user = await do_mod_reject(cq.bot, int(uid), reason, cq.from_user.id)
     if user is None:
         await answer_cq(cq, "Участник не найден", alert=True)

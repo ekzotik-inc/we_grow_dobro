@@ -47,7 +47,7 @@ async def cb_teams(cq: CallbackQuery, state: FSMContext) -> None:
             await answer_cq(cq, "Сначала зарегистрируйся", alert=True)
             return
         if user.status in (UserStatus.pending, UserStatus.rejected):
-            await answer_cq(cq, "Команды откроются после подтверждения заявки сотрудником P&C.", alert=True)
+            await answer_cq(cq, "Команды откроются после подтверждения заявки сотрудником P&amp;C.", alert=True)
             return
         text, markup = await render_teams(s, user)
     await edit(cq, text, markup)
@@ -109,7 +109,7 @@ async def cb_help_team(cq: CallbackQuery) -> None:
 async def cb_help_other(cq: CallbackQuery, state: FSMContext) -> None:
     await state.set_state(HelpFlow.question)
     await state.update_data({ANCHOR_KEY: cq.message.message_id})
-    await edit(cq, "✍️ Напиши свой вопрос одним сообщением — он будет передан сотруднику P&C.", kb.cancel_kb("menu"))
+    await edit(cq, "✍️ Напиши свой вопрос одним сообщением — он будет передан сотруднику P&amp;C.", kb.cancel_kb("menu"))
     await answer_cq(cq)
 
 
@@ -121,4 +121,4 @@ async def help_question(message: Message, state: FSMContext) -> None:
         await channels.notify_pc(cq_bot := message.bot, s, f"❓ <b>Вопрос от {texts.e(user.display_name)}{texts.e(uname)}</b> (tg id {user.tg_id}):\n\n{texts.e(message.text)}")
     await delete_quietly(message)
     await state.clear()
-    await edit_anchor(cq_bot, message.chat.id, state, "✅ Вопрос передан сотруднику P&C. Ответ придёт в этот чат.", kb.back_kb())
+    await edit_anchor(cq_bot, message.chat.id, state, "✅ Вопрос передан сотруднику P&amp;C. Ответ придёт в этот чат.", kb.back_kb())

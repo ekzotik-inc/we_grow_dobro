@@ -281,7 +281,7 @@ async def stray_admin_click(cq: CallbackQuery, state: FSMContext) -> None:
     Фильтр админ-роутера такие нажатия просто не пропускает, и кнопка выглядит сломанной,
     поэтому отвечаем вежливым отказом и возвращаем человека в его меню.
     """
-    await answer_cq(cq, "Раздел доступен только сотрудникам P&C.", alert=True)
+    await answer_cq(cq, "Раздел доступен только сотрудникам P&amp;C.", alert=True)
     async with session() as s:
         user = await load_user(s, cq.from_user)
         text, markup = (await render_menu(s, user)) if user.status != UserStatus.new else (texts.welcome(user), kb.start_kb())
@@ -321,7 +321,7 @@ async def reg_team_pick(cq: CallbackQuery, state: FSMContext) -> None:
     async with session() as s:
         team = await services.get_team(s, team_id) if team_id else None
     draft["team_id"] = team_id or None
-    draft["team_name"] = f"{team.emoji} {team.name}" if team else "на усмотрение P&C"
+    draft["team_name"] = f"{team.emoji} {team.name}" if team else "на усмотрение P&amp;C"
     await state.update_data(draft=draft)
     await state.set_state(Registration.confirm)
     await edit(cq, texts.registration_step("confirm", draft), kb.reg_kb("confirm"))
@@ -338,7 +338,7 @@ async def reg_confirm(cq: CallbackQuery, state: FSMContext) -> None:
     async with session() as s:
         user = await load_user(s, cq.from_user)
         if not await services.get_flag(s, "registration_open"):
-            await answer_cq(cq, "Регистрация на марафон закрыта. Обратитесь к сотруднику P&C.", alert=True)
+            await answer_cq(cq, "Регистрация на марафон закрыта. Обратитесь к сотруднику P&amp;C.", alert=True)
             return
         status = await services.register_user(
             s, user, draft["full_name"], draft.get("department"), draft.get("city"),
