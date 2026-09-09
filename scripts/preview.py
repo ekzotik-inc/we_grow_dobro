@@ -27,6 +27,7 @@ async def main():
         u = await services.get_or_create_user(s, 1000, "ivan")
         await services.register_user(s, u, "Иван Петров", "Отдел продаж", "Алматы")
         await services.approve_user(s, u, 999); await s.commit()
+        show("ПРАВИЛА", texts.RULES, kb.rules_kb(False))
         show("ПРИВЕТСТВИЕ", texts.welcome(u), kb.start_kb())
         u = await services.get_user(s, 1000)
         show("МЕНЮ — без команды", texts.main_menu(u, 0, None, None, {"total_teams": 0, "approved_total": 0, "submitted": 0}), kb.main_menu_kb(u))
