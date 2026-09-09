@@ -86,7 +86,9 @@ def main_menu_kb(user: User, pending: int = 0) -> InlineKeyboardMarkup:
     """Main menu: the action to take right now spans the full width, everything else pairs up below."""
     kb = InlineKeyboardBuilder()
     in_team = bool(user.team_id)
-    started = settings.marathon_status() == "active"
+    from .services import open_weeks
+
+    started = bool(open_weeks())
 
     # The primary button is whatever the participant should do next.
     if not in_team:
@@ -140,8 +142,6 @@ def teams_kb(rows: list[dict], user: User) -> InlineKeyboardMarkup:
         full = n >= settings.team_size
         mark = "✔️ " if user.team_id == t.id else ("🔒 " if full else "")
         kb.row(_btn(f"{mark}{t.emoji} {t.name} ({n}/{settings.team_size})", f"team:{t.id}"))
-    if not user.team_id:
-        kb.row(_btn("🤝 Попросить P&C о распределении", "help:team"))
     kb.row(_btn("⬅️ В меню", "menu"))
     return kb.as_markup()
 
@@ -149,8 +149,6 @@ def teams_kb(rows: list[dict], user: User) -> InlineKeyboardMarkup:
 def team_card_kb(team: Team, user: User, can_join: bool) -> InlineKeyboardMarkup:
     """Read-only for participants: joining and leaving is a P&C decision."""
     kb = InlineKeyboardBuilder()
-    if not user.team_id:
-        kb.row(_btn("🤝 Попросить P&C о распределении", "help:team"))
     kb.row(_btn("⬅️ К списку команд", "teams"))
     return kb.as_markup()
 
@@ -172,14 +170,14 @@ def cancel_kb(cb: str = "teams") -> InlineKeyboardMarkup:
 # ---------- tasks ----------
 
 def week_tabs_kb(active: int, tasks: list[Task], subs: dict[int, Submission]) -> InlineKeyboardMarkup:
-    from .services import week_is_visible
+    from .services import week_is_open
 
     kb = InlineKeyboardBuilder()
     # A week that has not started yet is not shown at all — no peeking ahead.
     tabs = [
         _btn(("• " if w.number == active else "") + f"Неделя {w.number}", f"tasks:w:{w.number}")
         for w in settings.weeks
-        if week_is_visible(w.number)
+        if week_is_open(w.number)
     ]
     if tabs:
         kb.row(*tabs)
@@ -198,12 +196,6 @@ def week_tabs_kb(active: int, tasks: list[Task], subs: dict[int, Submission]) ->
 def task_card_kb(task: Task, sub: Submission | None, is_open: bool, user: User) -> InlineKeyboardMarkup:
     kb = InlineKeyboardBuilder()
     active = user.status.value == "registered"
-    # Отчёт идёт в командный зачёт, поэтому без команды его не начать. Показывать кнопку,
-    # которая всё равно ответит отказом, — обманывать участника: вместо неё путь к P&C.
-    if active and is_open and not user.team_id:
-        kb.row(_btn("🤝 Попросить команду у P&C", "help:team", style="primary"))
-        kb.row(_btn("⬅️ К заданиям", f"tasks:w:{task.week}"))
-        return kb.as_markup()
     can_start = is_open and active and (sub is None or sub.status in (SubmissionStatus.rejected, SubmissionStatus.cancelled))
     if sub and sub.status == SubmissionStatus.draft and is_open:
         kb.row(_btn("📤 Продолжить отчёт", f"sub:open:{sub.id}"))
@@ -242,7 +234,7 @@ def admin_menu_kb(pending: int, applications: int = 0) -> InlineKeyboardMarkup:
     kb.row(_btn("👥 Участники", "adm:users:0"), _btn("🏷 Команды", "adm:teams"))
     kb.row(_btn("✉️ Рассылка по сегментам", "adm:bcast"))
     kb.row(_btn("📣 Анонс недели", "adm:announce"), _btn("⏰ Напомнить сейчас", "adm:remind"))
-    kb.row(_btn("📋 Задания", "adm:tasks"), _btn("📈 Статистика", "adm:stats"))
+    kb.row(_btn("📅 Недели и задания", "adm:weeks"), _btn("📈 Статистика", "adm:stats"))
     kb.row(_btn("⚙️ Каналы и настройки", "adm:cfg"), _btn("📥 Экспорт Excel", "adm:export"))
     kb.row(_btn("⬅️ В меню", "menu"))
     return kb.as_markup()
@@ -353,12 +345,25 @@ def segment_team_kb(teams: list[Team]) -> InlineKeyboardMarkup:
     return kb.as_markup()
 
 
+def weeks_admin_kb(open_numbers: list[int]) -> InlineKeyboardMarkup:
+    """Главный выключатель: включённая неделя показывает свои задания участникам."""
+    kb = InlineKeyboardBuilder()
+    for w in settings.weeks:
+        is_open = w.number in open_numbers
+        mark = "🟢" if is_open else "🔴"
+        action = "закрыть" if is_open else "открыть"
+        kb.row(_btn(f"{mark} Неделя {w.number} — {action}", f"adm:week_toggle:{w.number}"))
+    kb.row(_btn("📋 Задания по одному", "adm:tasks"))
+    kb.row(_btn("🛠 Панель", "adm"))
+    return kb.as_markup()
+
+
 def tasks_admin_kb(tasks: list[Task]) -> InlineKeyboardMarkup:
     kb = InlineKeyboardBuilder()
     for t in tasks:
         mark = "🟢" if t.is_active else "🔴"
         kb.row(_btn(f"{mark} нед.{t.week} №{t.code} {t.title[:28]}", f"adm:task_toggle:{t.id}"))
-    kb.row(_btn("🛠 Панель", "adm"))
+    kb.row(_btn("⬅️ Недели", "adm:weeks"))
     return kb.as_markup()
 
 

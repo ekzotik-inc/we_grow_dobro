@@ -1,6 +1,6 @@
 """Рендер всех участнических экранов на живых данных — визуальная проверка текстов."""
 import asyncio, html, os, re
-os.environ.update(BOT_TOKEN="1:x", FORCE_WEEK="1", ADMIN_IDS="999",
+os.environ.update(BOT_TOKEN="1:x", ADMIN_IDS="999",
                   DATABASE_URL="sqlite+aiosqlite:///./data/prev.db")
 from app import emoji, services, texts, keyboards as kb
 from app.db import SessionLocal, init_db
@@ -24,6 +24,8 @@ async def main():
     if os.path.exists("data/prev.db"): os.remove("data/prev.db")
     await init_db()
     async with SessionLocal() as s:
+        await services.set_week_open(s, 1, True)   # первую неделю открывает админ в панели
+        await s.commit()
         u = await services.get_or_create_user(s, 1000, "ivan")
         await services.register_user(s, u, "Иван Петров", "Отдел продаж", "Алматы")
         await services.approve_user(s, u, 999); await s.commit()
@@ -76,5 +78,9 @@ async def main():
         p = await services.get_or_create_user(s, 2000, "new")
         await services.register_user(s, p, "Новый Сотрудник", "IT", "Алматы"); await s.commit()
         show("ЖДЁТ МОДЕРАЦИИ", texts.pending_status(p), kb.pending_kb(p))
+        for w in (1, 2, 3):
+            await services.set_week_open(s, w, False)
+        await s.commit()
+        show("ЗАДАНИЯ ЗАКРЫТЫ", texts.tasks_soon(), kb.back_kb())
     os.remove("data/prev.db")
 asyncio.run(main())

@@ -107,7 +107,6 @@ class Settings:
     motivation_hour: int = int(os.getenv("MOTIVATION_HOUR", "11"))   # nudge every other day
     top_hour: int = int(os.getenv("TOP_HOUR", "19"))                 # standings, Wed and Sun
     # If set, the week is forced (useful for testing before the marathon starts). 0 = auto.
-    force_week: int = int(os.getenv("FORCE_WEEK", "0"))
     # Public URL of this service; when set, the bot pings its own /api/health so a free host does not sleep it.
     external_url: str = os.getenv("RENDER_EXTERNAL_URL", "").strip().rstrip("/")
     # Date the hosted database is deleted (free Render Postgres lives 30 days). Empty = no deadline.
@@ -149,32 +148,11 @@ class Settings:
     def today(self) -> date:
         return self.now().date()
 
-    def current_week(self) -> Week | None:
-        """Week whose date range contains today, or None outside the marathon."""
-        if self.force_week:
-            return self.week(self.force_week)
-        today = self.today()
-        for w in self.weeks:
-            if w.contains(today):
-                return w
-        return None
-
     def week(self, n: int) -> Week | None:
         for w in self.weeks:
             if w.number == n:
                 return w
         return None
-
-    def marathon_status(self) -> str:
-        """'before' | 'active' | 'after'"""
-        if self.force_week:
-            return "active"
-        today = self.today()
-        if today < self.weeks[0].start:
-            return "before"
-        if today > self.weeks[-1].end:
-            return "after"
-        return "active"
 
     def week_deadline(self, n: int) -> datetime:
         w = self.week(n)

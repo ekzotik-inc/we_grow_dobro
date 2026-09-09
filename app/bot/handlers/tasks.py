@@ -9,7 +9,6 @@ from aiogram.types import CallbackQuery, Message
 
 from ... import keyboards as kb
 from ... import services, texts
-from ...config import settings
 from ...models import SubmissionStatus, UserStatus
 from .. import channels
 from ..channels import send_files
@@ -27,24 +26,27 @@ async def _subs_map(s, user_id: int) -> dict:
 async def render_week(s, user, week: int):
     tasks = await services.list_tasks(s, week)
     subs = await _subs_map(s, user.id)
-    return texts.tasks_list(week, tasks, subs, no_team=not user.team_id), kb.week_tabs_kb(week, tasks, subs), f"week{week}.png"
+    return texts.tasks_list(week, tasks, subs), kb.week_tabs_kb(week, tasks, subs), f"week{week}.png"
 
 
 @router.callback_query(F.data == "tasks")
 async def cb_tasks(cq: CallbackQuery, state: FSMContext) -> None:
     await state.clear()
-    cw = settings.current_week()
-    visible = services.visible_weeks()
-    week = cw.number if cw else (visible[-1] if visible else 1)
+    weeks = services.open_weeks()
     async with session() as s:
         user = await load_user(s, cq.from_user)
         if user.status == UserStatus.new:
             await answer_cq(cq, "Сначала зарегистрируйся", alert=True)
             return
         if user.status in (UserStatus.pending, UserStatus.rejected):
-            await answer_cq(cq, "Задания откроются после подтверждения заявки сотрудником P&C.", alert=True)
+            await answer_cq(cq, "Задания откроются после подтверждения заявки.", alert=True)
             return
-        text, markup, image = await render_week(s, user, week)
+        if not weeks:
+            # Ни одна неделя не включена в панели — показываем ожидание, а не пустой список.
+            await edit(cq, texts.tasks_soon(), kb.back_kb())
+            await answer_cq(cq)
+            return
+        text, markup, image = await render_week(s, user, weeks[-1])
     await edit(cq, text, markup, image)
     await answer_cq(cq)
 
@@ -53,8 +55,8 @@ async def cb_tasks(cq: CallbackQuery, state: FSMContext) -> None:
 async def cb_tasks_week(cq: CallbackQuery, state: FSMContext) -> None:
     await state.clear()
     week = int(cq.data.split(":")[2])
-    if not services.week_is_visible(week):
-        await answer_cq(cq, "Эта неделя ещё не началась — задания откроются в свой срок.", alert=True)
+    if not services.week_is_open(week):
+        await answer_cq(cq, "Эта неделя пока закрыта — задания появятся, когда её откроют.", alert=True)
         return
     async with session() as s:
         user = await load_user(s, cq.from_user)
@@ -73,11 +75,11 @@ async def cb_task(cq: CallbackQuery, state: FSMContext) -> None:
         if task is None:
             await answer_cq(cq, "Задание не найдено", alert=True)
             return
-        if not services.week_is_visible(task.week):
+        if not services.week_is_open(task.week):
             await answer_cq(cq, "Эта неделя ещё не началась.", alert=True)
             return
         sub = await services.user_submission_for_task(s, user.id, task.id)
-    await edit(cq, texts.task_card(task, sub, await services.task_number(s, task), no_team=not user.team_id), kb.task_card_kb(task, sub, services.task_is_open(task), user), task.image)
+    await edit(cq, texts.task_card(task, sub, await services.task_number(s, task)), kb.task_card_kb(task, sub, services.task_is_open(task), user), task.image)
     await answer_cq(cq)
 
 
@@ -278,7 +280,7 @@ async def cb_sub_cancel_ok(cq: CallbackQuery, state: FSMContext) -> None:
         task = await services.get_task(s, sub.task_id)
         sub = await services.get_submission(s, sub.id)
     await state.clear()
-    await edit(cq, texts.task_card(task, sub, await services.task_number(s, task), no_team=not user.team_id), kb.task_card_kb(task, sub, services.task_is_open(task), user), task.image)
+    await edit(cq, texts.task_card(task, sub, await services.task_number(s, task)), kb.task_card_kb(task, sub, services.task_is_open(task), user), task.image)
     await answer_cq(cq, "Отчёт отменён")
 
 

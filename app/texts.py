@@ -171,8 +171,9 @@ def row(icon: str, label: str, value: str, extra: str = "") -> str:
 
 
 def main_menu(user: User, my_points: int, team_points: int | None, team_rank: int | None, week_stats: dict | None) -> str:
-    cw = settings.current_week()
-    status = settings.marathon_status()
+    from . import services  # локальный импорт: services знает, какие недели открыл админ
+
+    cw = services.current_week()
     total_teams = week_stats.get("total_teams") if week_stats else None
     ws = week_stats or {}
 
@@ -185,8 +186,6 @@ def main_menu(user: User, my_points: int, team_points: int | None, team_rank: in
         rank = f"🏆 #{team_rank} из {total_teams}" if team_rank and total_teams else ""
         lines.append(row("🌱", "Команда", f"{e(user.team.emoji)} {e(user.team.name)}", rank))
         lines.append(row("⚡", "Баллы команды", num(team_points or 0)))
-    else:
-        lines.append("🌱 Команда: <i>назначает P&amp;C</i>")
 
     approved = ws.get("approved_total", 0)
     place = f"место #{ws['my_rank']} из {ws['total_users']}" if ws.get("my_rank") and ws.get("total_users") else ""
@@ -195,41 +194,30 @@ def main_menu(user: User, my_points: int, team_points: int | None, team_rank: in
 
     if user.status == UserStatus.disqualified:
         lines.append("")
-        lines.append(f"{px('blocked')} Твои результаты сняты с командного зачёта. Вопросы — к сотруднику P&C.")
+        lines.append(f"{px('blocked')} Твои результаты сняты с командного зачёта. Вопросы — через «Помощь».")
         return "\n".join(lines)
 
     lines.append("")
-    if status == "before":
-        start = settings.weeks[0].start
-        lines.append(row("📅", "Старт", _date_ru(start)))
-        line = ("Команда есть, правила знаешь — ждём старта. Осталось совсем немного!" if user.team
-                else "Команду вот-вот назначит P&C. Если хочешь в конкретную — напиши через «Помощь».")
+    if cw is None:
+        lines.append("📅 <b>Задания скоро откроются</b>")
         lines.append("")
-        lines.append(voice(line))
-        return "\n".join(lines)
-
-    if status == "after":
-        lines.append("🏁 <b>Марафон завершён</b>")
-        lines.append("")
-        lines.append(voice(f"Спасибо, что дошёл до конца. Это были славные три недели {plain('heart')}"))
+        lines.append(voice("Неделя ещё не началась. Как только откроется — пришлю список заданий сюда.\n"
+                           "Пока загляни в «Правила», чтобы ничего не упустить."))
         return "\n".join(lines)
 
     sent, ok = ws.get("submitted", 0), ws.get("approved", 0)
-    deadline = settings.week_deadline(cw.number)
-    lines.append(row("📅", f"Неделя {cw.number}", f"до {_date_ru(deadline.date())}"))
+    lines.append(row("📅", f"Неделя {cw.number}", f"до {_date_ru(settings.week_deadline(cw.number).date())}"))
     lines.append(row("📤", "Сдано за неделю", f"{sent} из 4", f"зачтено {ok}"))
     lines.append("")
 
-    if not user.team:
-        line = "Задания открываются вместе с командой — её назначает P&C, это недолго."
-    elif sent == 0:
+    if sent == 0:
         line = "На этой неделе ещё ни одного дела. Загляни в задания — там есть простые, на десять минут."
     elif sent >= 4:
         line = f"Все четыре задания сданы. Это максимум за неделю, снимаю шляпу {plain('cool')}"
     else:
         left = 4 - sent
         line = f"Хороший темп! Можно взять ещё {left} {plural(left, 'задание', 'задания', 'заданий')} на этой неделе."
-    lines.append(voice(line))
+    lines.append(voice(line + "\nЖми «Задания недели» — покажу, что осталось."))
     return "\n".join(lines)
 
 
@@ -324,10 +312,23 @@ def week_max_points(tasks: list[Task]) -> int:
     return total
 
 
-def tasks_list(week: int, tasks: list[Task], subs: dict[int, Submission], no_team: bool = False) -> str:
-    cw = settings.current_week()
-    is_now = bool(cw and cw.number == week)
-    is_past = bool(cw and cw.number > week) or settings.marathon_status() == "after"
+def tasks_soon() -> str:
+    """Ни одна неделя не открыта: участник должен понимать, что всё идёт по плану."""
+    return (
+        "📅 <b>Задания скоро откроются</b>\n"
+        "<i>ждём старта недели</i>\n\n"
+        "Каждую неделю появляются <b>4 задания</b>, от <b>200</b> до <b>500</b> баллов за каждое. "
+        "Как только неделя откроется, я пришлю сюда список — пропустить не получится.\n\n"
+        + voice("Пока можно заглянуть в «Правила» — там сроки, условия зачёта и как всё считается.\n"
+                "Подготовься заранее, и первое дело займёт десять минут.")
+    )
+
+
+def tasks_list(week: int, tasks: list[Task], subs: dict[int, Submission]) -> str:
+    from . import services
+
+    is_now = services.week_is_open(week)
+    is_past = not is_now
 
     lines = [f"📅 <b>Неделя {week}</b>", f"<i>Период проведения: {week_period(week)}</i>"]
     if is_past:
@@ -347,9 +348,6 @@ def tasks_list(week: int, tasks: list[Task], subs: dict[int, Submission], no_tea
     done = len([x for x in subs.values() if x.week == week and x.status in (SubmissionStatus.pending, SubmissionStatus.approved)])
     total = week_max_points(tasks)
     hint = "\nНажми на задание — расскажу условия и приму отчёт."
-    if no_team:
-        hint = ("\nОтчёты идут в командный зачёт, поэтому сначала нужна команда — её назначает "
-                f"{pc_link()}. Открой любое задание и жми «Попросить команду у P&C».")
     if not is_now:
         line = f"Неделя уже закрыта, но условия можно посмотреть.{hint}"
     elif done == 0:
@@ -366,7 +364,7 @@ def tasks_list(week: int, tasks: list[Task], subs: dict[int, Submission], no_tea
     return "\n".join(lines)
 
 
-def task_card(task: Task, sub: Submission | None, number: int | None = None, no_team: bool = False) -> str:
+def task_card(task: Task, sub: Submission | None, number: int | None = None) -> str:
     head = f"Задание {number}" if number else f"Неделя {task.week}"
     lines = [f"<b>{head}</b>", f"{e(task.emoji)} <b>{e(task.title)}</b>"]
     lines.append(f"<b>{task.points_label}</b> {plural(max(task.points, 1), 'балл', 'балла', 'баллов')} "
@@ -399,12 +397,7 @@ def task_card(task: Task, sub: Submission | None, number: int | None = None, no_
         return "\n".join(lines)
 
     lines.append("")
-    if no_team:
-        lines.append(voice(
-            "Отчёты идут в командный зачёт, поэтому нужна команда — её назначает "
-            f"{pc_link()}.\nЖми «Попросить команду у P&C», я передам запрос прямо сейчас."
-        ))
-    elif task.options:
+    if task.options:
         lines.append(voice("Выбери вариант — покажу, что приложить, и приму отчёт."))
     else:
         lines.append(voice("Сделал? Жми «Сделать и отправить отчёт» — приложишь фото и пару строк."))

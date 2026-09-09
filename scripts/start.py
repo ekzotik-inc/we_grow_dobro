@@ -90,10 +90,6 @@ def main() -> int:
             "",
         )
 
-    week = (values.get("FORCE_WEEK") or "0").strip()
-    if week and week != "0":
-        say(f"[РЕЖИМ ТЕСТА] Принудительно открыта неделя {week} (FORCE_WEEK={week}).",
-            "              Перед реальным стартом марафона поставьте FORCE_WEEK=0.", "")
 
     say("Запускаю бота. Остановить — Ctrl+C в этом окне.", LINE, "")
 

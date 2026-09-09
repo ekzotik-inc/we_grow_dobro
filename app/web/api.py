@@ -9,15 +9,15 @@ from __future__ import annotations
 from fastapi import FastAPI
 from fastapi.responses import PlainTextResponse
 
-from ..config import settings
+from .. import services
 
 app = FastAPI(title="We Grow Dobro", docs_url=None, redoc_url=None)
 
 
 @app.get("/api/health")
 async def health() -> dict:
-    cw = settings.current_week()
-    return {"ok": True, "week": cw.number if cw else None, "status": settings.marathon_status()}
+    cw = services.current_week()
+    return {"ok": True, "week": cw.number if cw else None, "open_weeks": services.open_weeks()}
 
 
 @app.get("/", response_class=PlainTextResponse)

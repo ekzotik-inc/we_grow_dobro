@@ -45,13 +45,12 @@ def in_channel(cq: CallbackQuery) -> bool:
 async def render_admin(s):
     pending = await services.pending_count(s)
     apps = await services.pending_users_count(s)
-    cw = settings.current_week()
+    cw = services.current_week()
     reg_ch = await services.get_channel_id(s, "reg_channel_id")
     res_ch = await services.get_channel_id(s, "results_channel_id")
     participants = len([u for u in await services.list_participants(s) if u.status == UserStatus.registered])
     lines = ["🛠 <b>Панель P&C</b>",
-             f"<i>марафон {texts.MARATHON_STATUS_TEXT[settings.marathon_status()]}"
-             + (f" · неделя {cw.number}" if cw else "") + "</i>", ""]
+             "<i>" + (f"открыта неделя {cw.number}" if cw else "ни одна неделя не открыта") + "</i>", ""]
     lines.append(texts.rule("Требует внимания"))
     lines.append(texts.row("🙋", "Заявок на модерации", str(apps)))
     lines.append(texts.row("🔎", "Отчётов на проверке", str(pending)))
@@ -818,6 +817,41 @@ async def cb_apps(cq: CallbackQuery, state: FSMContext) -> None:
 
 # ---------- tasks ----------
 
+@router.callback_query(F.data == "adm:weeks")
+async def cb_weeks_admin(cq: CallbackQuery, state: FSMContext) -> None:
+    """Главный выключатель марафона: какие недели видят участники."""
+    await state.clear()
+    async with session() as s:
+        tasks = await services.list_all_tasks(s)
+    open_numbers = services.open_weeks()
+    lines = ["📅 <b>Недели и задания</b>", "<i>что сейчас видят участники</i>", ""]
+    for w in settings.weeks:
+        active = len([t for t in tasks if t.week == w.number and t.is_active])
+        state_txt = "🟢 открыта" if w.number in open_numbers else "🔴 закрыта"
+        lines.append(f"<b>Неделя {w.number}</b> — {state_txt}")
+        lines.append(f"заданий включено: {active} из {len([t for t in tasks if t.week == w.number])}")
+        lines.append("")
+    if not open_numbers:
+        lines.append("Сейчас участники видят экран «Задания скоро откроются».")
+    else:
+        lines.append("Участникам видны задания открытых недель. Отчёты принимаются только по ним.")
+    lines.append("")
+    lines.append("Нажми на неделю, чтобы открыть или закрыть её.")
+    await edit(cq, "\n".join(lines), kb.weeks_admin_kb(open_numbers))
+    await answer_cq(cq)
+
+
+@router.callback_query(F.data.regexp(r"^adm:week_toggle:(\d+)$"))
+async def cb_week_toggle(cq: CallbackQuery, state: FSMContext) -> None:
+    week = int(cq.data.split(":")[2])
+    now_open = not services.week_is_open(week)
+    async with session() as s:
+        await services.set_week_open(s, week, now_open)
+        await s.commit()
+    await answer_cq(cq, f"Неделя {week} {'открыта' if now_open else 'закрыта'}")
+    await cb_weeks_admin(cq, state)
+
+
 @router.callback_query(F.data == "adm:tasks")
 async def cb_tasks_admin(cq: CallbackQuery, state: FSMContext) -> None:
     await state.clear()
@@ -825,8 +859,10 @@ async def cb_tasks_admin(cq: CallbackQuery, state: FSMContext) -> None:
         tasks = await services.list_all_tasks(s)
     await edit(
         cq,
-        "📋 <b>Задания</b>\n\nНажми на задание, чтобы включить или выключить его показ участникам.\n"
-        "🟢 активно · 🔴 скрыто. Тексты и баллы редактируются в файле <code>data/tasks.json</code>.",
+        "📋 <b>Задания по одному</b>\n<i>тонкая настройка внутри недели</i>\n\n"
+        "Нажми на задание, чтобы включить или выключить его показ участникам.\n"
+        "🟢 активно · 🔴 скрыто. Задание видно, только если открыта его неделя.\n"
+        "Тексты и баллы редактируются в файле <code>data/tasks.json</code>.",
         kb.tasks_admin_kb(tasks),
     )
     await answer_cq(cq)
@@ -950,7 +986,7 @@ async def cb_team_del_ok(cq: CallbackQuery, state: FSMContext) -> None:
 
 @router.callback_query(F.data == "adm:remind")
 async def cb_remind(cq: CallbackQuery) -> None:
-    cw = settings.current_week()
+    cw = services.current_week()
     if not cw:
         await answer_cq(cq, "Сейчас нет активной недели", alert=True)
         return
@@ -971,7 +1007,7 @@ async def cb_stats(cq: CallbackQuery) -> None:
         subs_all = []
         for u in users:
             subs_all.extend(await services.user_submissions(s, u.id))
-        cw = settings.current_week()
+        cw = services.current_week()
         idle = await services.users_without_submissions(s, cw.number) if cw else []
     reg = [u for u in users if u.status.value == "registered"]
     lines = ["📈 <b>Статистика</b>", ""]

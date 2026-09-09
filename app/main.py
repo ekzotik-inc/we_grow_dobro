@@ -13,10 +13,11 @@ from aiogram.exceptions import TelegramUnauthorizedError
 from aiogram.fsm.storage.memory import MemoryStorage
 from aiogram.types import BotCommand, MenuButtonCommands
 
+from . import services
 from .bot.handlers import setup_routers
 from .bot.middlewares import premium_emoji_guard
 from .config import settings
-from .db import init_db
+from .db import SessionLocal, init_db
 from .scheduler import build_scheduler
 from .web.api import app as web_app
 
@@ -47,6 +48,9 @@ async def run() -> None:
         log.error("BOT_TOKEN не задан. Впишите токен от @BotFather в файл .env (см. .env.example).")
         sys.exit(EXIT_CONFIG_ERROR)
     await init_db()
+    async with SessionLocal() as s:
+        open_weeks = await services.load_open_weeks(s)
+    log.info("открытые недели: %s", open_weeks or "ни одной — участники видят «задания скоро»")
 
     bot = Bot(settings.bot_token, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
     bot.session.middleware(premium_emoji_guard)

@@ -272,7 +272,7 @@ async def join_team(s, user: User, team_id: int) -> Team:
 async def leave_team(s, user: User) -> None:
     if not user.team_id:
         raise ServiceError("Вы не состоите в команде.")
-    if settings.marathon_status() != "before" and not settings.force_week:
+    if open_weeks():
         raise ServiceError("Марафон уже начался — смена команды возможна только через сотрудника P&C.")
     team = await get_team(s, user.team_id)
     user.team_id = None
@@ -319,21 +319,60 @@ async def get_task(s, task_id: int) -> Task | None:
     return (await s.execute(select(Task).options(selectinload(Task.options)).where(Task.id == task_id))).scalar_one_or_none()
 
 
+# ---------- какие недели открыты (переключает админ в панели) ----------
+# Раньше неделя открывалась по датам, и участник не понимал, почему заданий нет.
+# Теперь всё решает выключатель в админ-панели: неделя включена — её задания видны и
+# принимаются, выключена — их нет в списке. Значение хранится в базе, в памяти держим
+# копию, чтобы синхронный код (клавиатуры, тексты) не ходил в базу на каждой строке.
+_WEEK_KEY = "week_open:{}"
+_open_weeks: set[int] = set()
+
+
+async def load_open_weeks(s) -> set[int]:
+    """Прочитать выключатели из базы в кеш процесса. Вызывается при старте бота."""
+    global _open_weeks
+    found = set()
+    for w in settings.weeks:
+        if await get_setting(s, _WEEK_KEY.format(w.number)) == "1":
+            found.add(w.number)
+    _open_weeks = found
+    return found
+
+
+async def set_week_open(s, week: int, is_open: bool) -> None:
+    await set_setting(s, _WEEK_KEY.format(week), "1" if is_open else "0")
+    if is_open:
+        _open_weeks.add(week)
+    else:
+        _open_weeks.discard(week)
+
+
+def open_weeks() -> list[int]:
+    """Номера включённых недель по возрастанию."""
+    return sorted(_open_weeks)
+
+
+def week_is_open(week: int) -> bool:
+    return week in _open_weeks
+
+
+def current_week():
+    """Неделя, которую показываем как текущую, — последняя включённая."""
+    numbers = open_weeks()
+    return settings.week(numbers[-1]) if numbers else None
+
+
 def task_is_open(task: Task) -> bool:
-    cw = settings.current_week()
-    return cw is not None and cw.number == task.week
+    return task.is_active and week_is_open(task.week)
 
 
+# Прежние имена оставлены: ими пользуются клавиатуры и мини-проверки.
 def week_is_visible(week: int) -> bool:
-    """A week's tasks stay hidden until that week starts; past weeks stay readable."""
-    if settings.marathon_status() == "after":
-        return True
-    cw = settings.current_week()
-    return bool(cw and week <= cw.number)
+    return week_is_open(week)
 
 
 def visible_weeks() -> list[int]:
-    return [w.number for w in settings.weeks if week_is_visible(w.number)]
+    return open_weeks()
 
 
 # ---------- submissions ----------
@@ -368,11 +407,11 @@ async def user_submissions(s, user_id: int) -> list[Submission]:
 async def start_submission(s, user: User, task: Task, option_id: int | None) -> Submission:
     ensure_approved(user)
     if not await get_flag(s, "submissions_open"):
-        raise ServiceError("Приём отчётов временно приостановлен сотрудником P&C.")
-    if not user.team_id:
-        raise ServiceError("Задания идут в командный зачёт, а команды пока нет. Её назначает P&C — напишите им через «Помощь».")
+        raise ServiceError("Приём отчётов сейчас закрыт. Как только откроем — сообщу.")
+    # Команда для отчёта не нужна: баллы записываются на участника и попадают в командный
+    # зачёт автоматически, как только P&C определит его в команду.
     if not task_is_open(task):
-        raise ServiceError("Это задание можно выполнять только в его неделю.")
+        raise ServiceError("Это задание сейчас закрыто. Как только неделя откроется, я напишу.")
     if task.has_options and option_id is None:
         raise ServiceError("Выберите одну опцию задания.")
     option = None
@@ -579,7 +618,7 @@ async def segment_users(s, code: str, arg: str | None = None) -> list[User]:
     approved participants only."""
     users = await list_participants(s)
     active = [u for u in users if u.status == UserStatus.registered]
-    cw = settings.current_week()
+    cw = current_week()
 
     if code == "pending_approval":
         return [u for u in users if u.status == UserStatus.pending]

@@ -1,6 +1,6 @@
 """End-to-end check of the business logic without Telegram.
 
-Run:  BOT_TOKEN=test:token FORCE_WEEK=1 DATABASE_URL=sqlite+aiosqlite:///./data/smoke.db python -m scripts.smoke_test
+Run:  BOT_TOKEN=test:token DATABASE_URL=sqlite+aiosqlite:///./data/smoke.db python -m scripts.smoke_test
 """
 from __future__ import annotations
 
@@ -8,7 +8,6 @@ import asyncio
 import os
 
 os.environ.setdefault("BOT_TOKEN", "123:test-token")
-os.environ.setdefault("FORCE_WEEK", "1")
 os.environ.setdefault("DATABASE_URL", "sqlite+aiosqlite:///./data/smoke.db")
 os.environ.setdefault("ADMIN_IDS", "999")
 
@@ -63,6 +62,45 @@ def check_no_plain_emoji() -> None:
     print("emoji ok: обычных эмодзи не осталось,", len(em.CHARS), "символов в наборе")
 
 
+async def check_week_switch() -> None:
+    """Недели открывает админ. Пока ни одна не открыта, участник не видит и не сдаёт задания."""
+    async with SessionLocal() as s:
+        for w in (1, 2, 3):
+            await services.set_week_open(s, w, False)
+        await s.commit()
+        await services.load_open_weeks(s)
+        assert services.open_weeks() == [], "выключенные недели не открыты"
+        assert services.current_week() is None
+        u = await services.get_or_create_user(s, 777, "closedweek")
+        await services.register_user(s, u, "Пётр Закрытов", "IT", "Алматы")
+        await services.approve_user(s, u, 999)
+        await s.commit()
+        task = (await services.list_tasks(s, 1))[0]
+        assert not services.task_is_open(task)
+        try:
+            await services.start_submission(s, u, task, None)
+            raise AssertionError("отчёт принят при закрытой неделе")
+        except services.ServiceError as ex:
+            assert "закрыт" in str(ex), ex
+
+        await services.set_week_open(s, 1, True)
+        await s.commit()
+        assert services.open_weeks() == [1] and services.current_week().number == 1
+        assert services.task_is_open(task)
+        # отчёт принимается без команды: баллы попадут в командный зачёт после назначения
+        assert u.team_id is None
+        sub = await services.start_submission(s, u, task, None)
+        await s.commit()
+        assert sub is not None
+
+        await services.set_week_open(s, 1, False)
+        await s.commit()
+        assert services.open_weeks() == [] and not services.task_is_open(task)
+        await services.set_week_open(s, 1, True)   # вернуть как было для остальных проверок
+        await s.commit()
+    print("week switch ok")
+
+
 async def check_auto_migration() -> None:
     """A release that adds a field must upgrade a database made by the previous release.
 
@@ -90,6 +128,10 @@ async def main() -> None:
     await init_db()
     await check_auto_migration()
     check_no_plain_emoji()
+    async with SessionLocal() as s:
+        # Недели открывает админ; для остальных проверок открываем первую.
+        await services.set_week_open(s, 1, True)
+        await s.commit()
     async with SessionLocal() as s:
         tasks = await services.list_tasks(s)
         assert len(tasks) == 12, len(tasks)
@@ -270,6 +312,8 @@ async def main() -> None:
     # The TestClient runs the app in its own event loop, and asyncpg connections belong to the loop that
     # opened them — release the pool so the client opens fresh ones.
     await engine.dispose()
+
+    await check_week_switch()
 
     # Служебный HTTP: хостинг проверяет живость этим адресом, интерфейса больше нет.
     client = TestClient(app)

@@ -8,7 +8,6 @@ from aiogram.types import CallbackQuery, Message, ReplyKeyboardRemove
 
 from ... import keyboards as kb
 from ... import services, texts
-from ...config import settings
 from ...models import UserStatus
 from .. import channels
 from ..common import ANCHOR_KEY, answer_cq, delete_quietly, edit, edit_anchor, load_user, remember_anchor, session
@@ -29,7 +28,7 @@ async def render_menu(s, user) -> tuple[str, object]:
         for i, r in enumerate(rows, 1):
             if r["team"].id == user.team_id:
                 team_points, rank = r["points"], i
-    cw = settings.current_week()
+    cw = services.current_week()
     ws = dict(await services.week_stats_for_user(s, user.id, cw.number)) if cw else {}
     ws["total_teams"] = len(rows)
     ws["approved_total"] = len(

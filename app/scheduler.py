@@ -25,7 +25,7 @@ async def _already_sent(s, kind: str) -> bool:
 
 async def motivation_job(bot: Bot) -> None:
     """A short nudge every other day, so the marathon stays present without becoming noise."""
-    if settings.marathon_status() != "active":
+    if not services.open_weeks():
         return
     async with SessionLocal() as s:
         day = (settings.today() - settings.weeks[0].start).days
@@ -40,7 +40,7 @@ async def motivation_job(bot: Bot) -> None:
 
 async def top_digest_job(bot: Bot) -> None:
     """Standings for everyone, twice a week."""
-    if settings.marathon_status() != "active":
+    if not services.open_weeks():
         return
     if settings.now().weekday() not in (2, 6):  # Wednesday and Sunday
         return
@@ -57,9 +57,9 @@ async def top_digest_job(bot: Bot) -> None:
 
 
 async def announce_week_job(bot: Bot) -> None:
-    """Runs every day at ANNOUNCE_HOUR; sends the announcement once on the first day of each week."""
-    cw = settings.current_week()
-    if not cw or settings.today() != cw.start and not settings.force_week:
+    """Анонс уходит один раз на каждую открытую неделю — сразу после того, как её включил админ."""
+    cw = services.current_week()
+    if not cw:
         return
     kind = f"week_announce:{cw.number}"
     async with SessionLocal() as s:
@@ -72,7 +72,7 @@ async def announce_week_job(bot: Bot) -> None:
 
 async def reminder_job(bot: Bot) -> None:
     """Day before the week's deadline: nudge participants who have not submitted anything this week."""
-    cw = settings.current_week()
+    cw = services.current_week()
     if not cw:
         return
     days_left = (cw.end - settings.today()).days
