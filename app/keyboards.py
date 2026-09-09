@@ -148,9 +148,25 @@ def teams_kb(rows: list[dict], user: User) -> InlineKeyboardMarkup:
 
 
 def team_card_kb(team: Team, user: User, can_join: bool) -> InlineKeyboardMarkup:
-    """Read-only for participants: joining and leaving is a P&C decision."""
+    """Read-only for participants: joining and leaving is a P&C decision.
+
+    Единственное действие — позвать коллегу в свою команду по ссылке.
+    """
     kb = InlineKeyboardBuilder()
+    if user.team_id == team.id and user.status.value == "registered":
+        kb.row(_btn("🔗 Пригласить в команду", f"team:invite:{team.id}", style="primary"))
     kb.row(_btn("⬅️ К списку команд", "teams"))
+    return kb.as_markup()
+
+
+def team_invite_kb(team_id: int, link: str) -> InlineKeyboardMarkup:
+    """Экран приглашения: переслать ссылку коллеге прямо из Telegram."""
+    from urllib.parse import quote
+
+    kb = InlineKeyboardBuilder()
+    share = f"https://t.me/share/url?url={quote(link, safe='')}&text={quote('Присоединяйся к марафону добрых дел — я в этой команде!', safe='')}"
+    kb.row(InlineKeyboardButton(text="📨 Отправить коллеге", url=share))
+    kb.row(_btn("⬅️ К команде", f"team:{team_id}"))
     return kb.as_markup()
 
 
@@ -623,6 +639,7 @@ def admin_teams_kb(rows: list[dict]) -> InlineKeyboardMarkup:
 def announce_kb() -> InlineKeyboardMarkup:
     kb = InlineKeyboardBuilder()
     kb.row(*[_btn(f"📣 Неделя {w.number}", f"adm:announce_ok:{w.number}") for w in settings.weeks])
+    kb.row(_btn("💚 Мотивация недели", "adm:weekly"))
     kb.row(_btn("⬅️ Панель", "adm"))
     return kb.as_markup()
 

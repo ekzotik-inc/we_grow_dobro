@@ -113,6 +113,9 @@ class Settings:
     db_keepalive_minutes: int = int(os.getenv("DB_KEEPALIVE_MINUTES", "4"))
     motivation_hour: int = int(os.getenv("MOTIVATION_HOUR", "11"))   # nudge every other day
     top_hour: int = int(os.getenv("TOP_HOUR", "19"))                 # standings, Wed and Sun
+    # Еженедельная мотивационная рассылка всем участникам: день недели (0 — понедельник) и час.
+    weekly_weekday: int = int(os.getenv("WEEKLY_WEEKDAY", "0"))
+    weekly_hour: int = int(os.getenv("WEEKLY_HOUR", "10"))
     # If set, the week is forced (useful for testing before the marathon starts). 0 = auto.
     # Public URL of this service; when set, the bot pings its own /api/health so a free host does not sleep it.
     external_url: str = os.getenv("RENDER_EXTERNAL_URL", "").strip().rstrip("/")

@@ -1,6 +1,7 @@
 """Business logic. Every function takes an AsyncSession and never touches Telegram."""
 from __future__ import annotations
 
+import re
 from datetime import datetime
 
 from sqlalchemy import delete, func, select
@@ -121,7 +122,8 @@ async def get_user_by_id(s, user_id: int) -> User | None:
     return (await s.execute(select(User).options(selectinload(User.team)).where(User.id == user_id))).scalar_one_or_none()
 
 
-async def save_draft(s, user: User, full_name: str | None = None, phone: str | None = None) -> None:
+async def save_draft(s, user: User, full_name: str | None = None, phone: str | None = None,
+                     ref_team_id: int | None = None, invited_by: int | None = None) -> None:
     """Сохранить шаг анкеты сразу в базу.
 
     Состояние диалога живёт в памяти процесса, а хостинг усыпляет и перезапускает сервис —
@@ -131,16 +133,27 @@ async def save_draft(s, user: User, full_name: str | None = None, phone: str | N
         user.full_name = full_name.strip()[:160]
     if phone is not None:
         user.phone = phone.strip()[:32] or None
+    if ref_team_id is not None:
+        user.ref_team_id = ref_team_id or None
+    if invited_by is not None:
+        user.invited_by = invited_by or None
     await s.flush()
 
 
-def draft_from_user(user: User) -> dict:
+async def draft_from_user(s, user: User) -> dict:
     """Черновик анкеты, восстановленный из базы после перезапуска бота."""
     draft = {}
     if user.full_name:
         draft["full_name"] = user.full_name
     if user.phone:
         draft["phone"] = user.phone
+    if user.ref_team_id:
+        # Команда уже выбрана пригласившим — анкета из двух шагов.
+        team = await get_team(s, user.ref_team_id)
+        if team is not None:
+            draft["team_id"] = team.id
+            draft["team_name"] = f"{team.emoji} {team.name}"
+            draft["total"] = 2
     return draft
 
 
@@ -150,7 +163,21 @@ def draft_step(user: User) -> str:
         return "full_name"
     if not user.phone:
         return "phone"
-    return "team"
+    # По приглашению команда уже известна — сразу к подтверждению.
+    return "confirm" if user.ref_team_id else "team"
+
+
+def invite_link(bot_username: str, team_id: int, inviter_tg_id: int) -> str:
+    """Ссылка-приглашение в конкретную команду: получатель регистрируется в два шага."""
+    return f"https://t.me/{bot_username}?start=ref_{team_id}_{inviter_tg_id}"
+
+
+def parse_invite(payload: str) -> tuple[int, int] | None:
+    """Разобрать полезную нагрузку deep link «ref_<команда>_<пригласивший>»."""
+    m = re.match(r"^ref_(\d+)(?:_(\d+))?$", payload.strip())
+    if not m:
+        return None
+    return int(m.group(1)), int(m.group(2) or 0)
 
 
 async def register_user(
@@ -163,7 +190,7 @@ async def register_user(
     user.city = (city or "").strip()[:80] or None
     if phone is not None:
         user.phone = phone.strip()[:32] or None
-    user.wanted_team_id = wanted_team_id
+    user.wanted_team_id = wanted_team_id or user.ref_team_id
     user.rules_accepted_at = datetime.utcnow()
     user.reject_reason = None
     moderation = await get_flag(s, "moderation_required")

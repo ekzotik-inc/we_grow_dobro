@@ -13,7 +13,7 @@ os.environ.setdefault("ADMIN_IDS", "999")
 
 from fastapi.testclient import TestClient  # noqa: E402
 
-from app import services  # noqa: E402
+from app import services, texts  # noqa: E402
 from app.config import settings  # noqa: E402
 from app.db import SessionLocal, engine, init_db  # noqa: E402
 from app.export import export_xlsx  # noqa: E402
@@ -181,6 +181,14 @@ async def check_admin_router_blocks() -> None:
             seen.clear()
             await dp.feed_update(bot, callback_update(staff, data))
             assert seen == [expected], f"сотруднику {staff} недоступно {data}: {seen}"
+
+    # Ссылка-приглашение должна попадать в свой обработчик, а не в общий /start.
+    seen.clear()
+    await dp.feed_update(bot, message_update(stranger, "/start ref_1_555"))
+    assert seen == ["start.cmd_start_invite"], f"приглашение ушло не туда: {seen}"
+    seen.clear()
+    await dp.feed_update(bot, message_update(stranger, "/start"))
+    assert seen == ["start.cmd_start"], f"обычный /start сломан: {seen}"
 
     for handler, callback in originals:
         object.__setattr__(handler, "callback", callback)
@@ -500,8 +508,62 @@ async def check_registration_resume() -> None:
         await services.save_draft(s, u, phone="+77001234567")
         await s.commit()
         assert services.draft_step(u) == "team"
-        assert services.draft_from_user(u) == {"full_name": "Анна Восстановленная", "phone": "+77001234567"}
+        assert await services.draft_from_user(s, u) == {"full_name": "Анна Восстановленная", "phone": "+77001234567"}
     print("registration resume ok")
+
+
+async def check_invite_link() -> None:
+    """Приглашение в команду: анкета сокращается до двух шагов, команда подставляется сама."""
+    async with SessionLocal() as s:
+        team = await services.create_team(s, None, "Приглашённые", "🔥")
+        await s.commit()
+        link = services.invite_link("dobro_bot", team.id, 555)
+        assert link == f"https://t.me/dobro_bot?start=ref_{team.id}_555", link
+        assert services.parse_invite(f"ref_{team.id}_555") == (team.id, 555)
+        assert services.parse_invite("ref_7") == (7, 0)
+        assert services.parse_invite("subrej_7") is None, "чужие deep link не трогаем"
+
+        u = await services.get_or_create_user(s, 5555, "invited")
+        await services.save_draft(s, u, ref_team_id=team.id, invited_by=555)
+        await s.commit()
+        assert services.draft_step(u) == "full_name"
+        await services.save_draft(s, u, full_name="Марат Приглашённый")
+        await services.save_draft(s, u, phone="+998901112233")
+        await s.commit()
+        # Шага выбора команды нет — сразу подтверждение.
+        assert services.draft_step(u) == "confirm", "по приглашению третьего шага быть не должно"
+        draft = await services.draft_from_user(s, u)
+        assert draft["team_id"] == team.id and draft["total"] == 2, draft
+        assert "Шаг 1 из 2" in texts.registration_step("full_name", draft)
+        assert "Шаг 2 из 2" in texts.registration_step("phone", draft)
+
+        # Заявка уходит с уже выбранной командой, и приём кладёт человека именно туда.
+        await services.register_user(s, u, "Марат Приглашённый", None, None, phone=u.phone)
+        assert u.wanted_team_id == team.id, "команда из приглашения должна попасть в заявку"
+        await services.approve_user(s, u, 1)
+        await s.commit()
+        assert u.team_id == team.id, "принятый по приглашению попадает в нужную команду"
+        assert "По приглашению" in texts.registration_channel_card(u)
+    print("invite link ok")
+
+
+async def check_weekly_broadcast() -> None:
+    """Еженедельная мотивация: текст собирается и с открытой неделей, и без неё."""
+    from app.scheduler import weekly_text
+
+    async with SessionLocal() as s:
+        await services.load_open_weeks(s)
+        text = await weekly_text(s)
+        assert len(text) <= 4096, len(text)
+        assert "Добрик" in text or "марафон" in text.lower(), text[:200]
+
+        await services.set_week_open(s, 1, True)
+        await s.commit()
+        await services.load_open_weeks(s)
+        text = await weekly_text(s)
+        assert "Неделя 1" in text and "Задания" not in text[:40], text[:200]
+        assert len(text) <= 4096, len(text)
+    print("weekly broadcast ok")
 
 
 async def check_week_switch() -> None:
@@ -773,6 +835,8 @@ async def main() -> None:
     await check_missing_user_buttons()
     await check_report_edge_cases()
     await check_manual_results()
+    await check_invite_link()
+    await check_weekly_broadcast()
 
     # Служебный HTTP: хостинг проверяет живость этим адресом, интерфейса больше нет.
     client = TestClient(app)

@@ -45,6 +45,35 @@ async def render_menu(s, user) -> tuple[str, object]:
     return texts.main_menu(user, my_points, team_points, rank, ws), kb.main_menu_kb(user, pending)
 
 
+@router.message(CommandStart(), F.text.regexp(r"^/start ref_\d+(?:_\d+)?$"))
+async def cmd_start_invite(message: Message, state: FSMContext) -> None:
+    """Ссылка-приглашение в команду: команда запоминается, анкета сокращается до двух шагов."""
+    parsed = services.parse_invite(message.text.split(maxsplit=1)[1])
+    await state.clear()
+    async with session() as s:
+        user = await load_user(s, message.from_user)
+        team = await services.get_team(s, parsed[0]) if parsed else None
+        if user.status != UserStatus.new:
+            # Уже в марафоне — приглашение ничего не меняет, показываем обычное меню.
+            text, markup = await render_menu(s, user)
+            m = await message.answer(text, reply_markup=markup)
+            await state.update_data({ANCHOR_KEY: m.message_id})
+            return
+        inviter = None
+        if team is not None:
+            inviter_user = await services.get_user(s, parsed[1]) if parsed[1] else None
+            inviter = inviter_user.display_name if inviter_user else None
+            await services.save_draft(s, user, ref_team_id=team.id, invited_by=parsed[1] or None)
+            await s.commit()
+        team_name = f"{team.emoji} {team.name}" if team else ""
+    if team is None:
+        # Команду удалили или ссылка битая — обычное приветствие, выбор команды остаётся.
+        m = await message.answer(texts.welcome(user), reply_markup=kb.start_kb())
+    else:
+        m = await message.answer(texts.welcome_invited(team_name, inviter), reply_markup=kb.start_kb())
+    await state.update_data({ANCHOR_KEY: m.message_id})
+
+
 @router.message(CommandStart())
 @router.message(Command("menu"))
 async def cmd_start(message: Message, state: FSMContext) -> None:
@@ -109,8 +138,13 @@ async def cmd_rules(message: Message) -> None:
 async def reg_start(cq: CallbackQuery, state: FSMContext) -> None:
     await state.clear()
     await state.set_state(Registration.full_name)
-    await state.update_data({ANCHOR_KEY: cq.message.message_id, "draft": {}})
-    await edit(cq, texts.registration_step("full_name", {}), kb.reg_kb("full_name"))
+    async with session() as s:
+        user = await load_user(s, cq.from_user)
+        draft = await services.draft_from_user(s, user)
+    draft.pop("full_name", None)
+    draft.pop("phone", None)
+    await state.update_data({ANCHOR_KEY: cq.message.message_id, "draft": draft})
+    await edit(cq, texts.registration_step("full_name", draft), kb.reg_kb("full_name"))
     await answer_cq(cq)
 
 
@@ -207,11 +241,19 @@ async def _phone_accepted(message: Message, state: FSMContext, phone: str) -> No
         await s.commit()
         if not draft.get("full_name") and user.full_name:
             draft["full_name"] = user.full_name
+        if user.ref_team_id and not draft.get("team_id"):
+            draft.update(await services.draft_from_user(s, user))
     await state.update_data(draft=draft)
     await state.set_state(Registration.team)
 
     await _drop_phone_keyboard(message, state, f"✅ <b>Номер принят:</b> {texts.e(phone)}")
 
+    if draft.get("team_id"):
+        # Пришёл по приглашению: команда уже выбрана, третьего шага нет.
+        await state.set_state(Registration.confirm)
+        await edit_anchor(message.bot, message.chat.id, state,
+                          texts.registration_step("confirm", draft), kb.reg_kb("confirm"))
+        return
     async with session() as s:
         rows = await services.leaderboard(s)
     await edit_anchor(message.bot, message.chat.id, state,
@@ -274,12 +316,12 @@ async def _resume_registration(message: Message, state: FSMContext) -> bool:
         user = await load_user(s, message.from_user)
         if user.status != UserStatus.new:
             return False
-        draft = services.draft_from_user(user)
+        draft = await services.draft_from_user(s, user)
         step = services.draft_step(user)
         rows = await services.leaderboard(s) if step == "team" else []
 
     await state.set_state({"full_name": Registration.full_name, "phone": Registration.phone,
-                           "team": Registration.team}[step])
+                           "team": Registration.team, "confirm": Registration.confirm}[step])
     await state.update_data(draft=draft)
     markup = kb.reg_team_kb(rows) if step == "team" else kb.reg_kb(step)
     m = await message.answer(texts.registration_step(step, draft), reply_markup=markup)

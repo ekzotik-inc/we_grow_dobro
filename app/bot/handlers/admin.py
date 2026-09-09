@@ -655,6 +655,18 @@ async def cb_announce_ok(cq: CallbackQuery) -> None:
     await edit(cq, f"📣 Анонс недели {week} отправлен {n} участникам.", kb.back_kb("adm", "🛠 Панель"))
 
 
+@router.callback_query(F.data == "adm:weekly")
+async def cb_weekly(cq: CallbackQuery) -> None:
+    """Ручной запуск еженедельной мотивации — тот же текст, что уходит по расписанию."""
+    from ...scheduler import weekly_text
+
+    await answer_cq(cq, "Рассылаю…")
+    async with session() as s:
+        n = await broadcast(cq.bot, s, await weekly_text(s),
+                            f"weekly:{settings.today().isoformat()}:manual")
+    await edit(cq, f"💚 Мотивация недели отправлена {n} участникам.", kb.back_kb("adm", "🛠 Панель"))
+
+
 @router.callback_query(F.data.regexp(r"^adm:bcast$"))
 async def cb_bcast(cq: CallbackQuery, state: FSMContext) -> None:
     """Step 1: pick the audience segment."""

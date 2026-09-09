@@ -49,6 +49,9 @@ class User(Base):
     department: Mapped[str | None] = mapped_column(String(160))
     phone: Mapped[str | None] = mapped_column(String(32))
     wanted_team_id: Mapped[int | None] = mapped_column(Integer)  # team asked for at sign-up; P&C decides
+    # Пришёл по реферальной ссылке коллеги: команда уже выбрана за него, шаг выбора пропускаем.
+    ref_team_id: Mapped[int | None] = mapped_column(Integer)
+    invited_by: Mapped[int | None] = mapped_column(BigInteger)  # tg_id пригласившего
     city: Mapped[str | None] = mapped_column(String(80))
     status: Mapped[UserStatus] = mapped_column(Enum(UserStatus), default=UserStatus.new)
     is_admin: Mapped[bool] = mapped_column(Boolean, default=False)

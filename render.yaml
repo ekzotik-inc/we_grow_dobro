@@ -57,5 +57,9 @@ services:
         value: "11"
       - key: TOP_HOUR          # час публикации топа (среда и воскресенье)
         value: "19"
+      - key: WEEKLY_WEEKDAY    # день еженедельной мотивации: 0 — понедельник
+        value: "0"
+      - key: WEEKLY_HOUR       # час еженедельной мотивации
+        value: "10"
       - key: DB_EXPIRES_AT     # у платной базы Render срока нет — оставляем пустым
         value: ""

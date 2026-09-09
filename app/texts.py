@@ -138,19 +138,63 @@ def registration_step(step: str, draft: dict) -> str:
     header = f"{px('rocket')} <b>Заявка на участие</b>"
     filled = ("\n" + "\n".join(done)) if done else ""
 
+    total = int(draft.get("total") or 3)
     prompts = {
-        "full_name": ("Шаг 1 из 3", "Напиши имя и фамилию — так тебя увидят в команде и рейтинге."),
-        "phone": ("Шаг 2 из 3", "Напиши номер телефона сообщением — например, <code>+998 90 123 45 67</code>. "
+        "full_name": (f"Шаг 1 из {total}", "Напиши имя и фамилию — так тебя увидят в команде и рейтинге."),
+        "phone": (f"Шаг 2 из {total}", "Напиши номер телефона сообщением — например, <code>+998 90 123 45 67</code>. "
                                 "Он нужен сотруднику P&amp;C, чтобы связаться с тобой по заданиям.\n"
                                 "<i>На телефоне можно нажать кнопку «Поделиться номером» внизу. "
                                 "В Telegram на компьютере такая кнопка не срабатывает — там просто напиши номер.</i>"),
-        "team": ("Шаг 3 из 3", "Выбери команду, в которой хочешь участвовать. "
+        "team": (f"Шаг 3 из {total}", "Выбери команду, в которой хочешь участвовать. "
                                "Окончательно распределяет сотрудник P&amp;C — он учтёт твой выбор."),
         "confirm": ("Последний шаг", "Проверь данные. Отправляя заявку, ты принимаешь правила "
                                      "и обязуешься пройти марафон до конца."),
     }
     title, body = prompts[step]
-    return f"{header}{filled}\n\n<b>{title}</b>\n{body}"
+    hint = ""
+    if total == 2 and step in ("full_name", "phone"):
+        hint = f"\n\n<i>Команда уже выбрана за тебя — {e(draft.get('team_name', ''))}. Осталось два шага.</i>"
+    return f"{header}{filled}\n\n<b>{title}</b>\n{body}{hint}"
+
+
+def welcome_invited(team_name: str, inviter: str | None) -> str:
+    """Приветствие для того, кто пришёл по ссылке-приглашению коллеги."""
+    who = f"<b>{e(inviter)}</b> зовёт тебя" if inviter else "Тебя зовут"
+    return (
+        f"{px('heart')} <b>{e(settings.marathon_title)}</b>\n\n"
+        f"{who} в команду <b>{e(team_name)}</b>.\n\n"
+        "Три недели мы вместе делаем добрые дела — по-настоящему, а не для галочки. "
+        "Каждую неделю четыре задания на выбор и общий зачёт.\n\n"
+        + voice("Команду выбирать не нужно — она уже твоя. Останется два шага: имя и номер телефона. "
+                f"Загляни в правила и жми «Участвовать» {plain('rocket')}")
+    )
+
+
+def invite_screen(team, link: str, members: int) -> str:
+    """Экран «Пригласить в команду»: ссылку можно скопировать одним касанием."""
+    free = max(settings.team_size - members, 0)
+    lines = [
+        "🔗 <b>Приглашение в команду</b>",
+        f"{e(team.emoji)} <b>{e(team.name)}</b> · {members} из {settings.team_size}",
+        "",
+    ]
+    lines.append(
+        f"Свободных мест: <b>{free}</b>." if free else
+        "Мест в команде уже нет — новых участников распределит сотрудник P&amp;C."
+    )
+    lines += [
+        "",
+        "Отправь коллеге эту ссылку:",
+        f"<code>{e(link)}</code>",
+        "",
+        rule("Что увидит коллега"),
+        "Бот откроется с твоим приглашением, команду выбирать не придётся — "
+        "останется два шага: имя и номер телефона.",
+        "",
+        voice("Ссылка не заканчивается — зови всех, кого хочешь видеть рядом. "
+              "Итоговое распределение всё равно подтверждает сотрудник P&amp;C."),
+    ]
+    return "\n".join(lines)
 
 
 MONTHS = ["января", "февраля", "марта", "апреля", "мая", "июня",
@@ -655,6 +699,9 @@ def registration_channel_card(user: User) -> str:
     if user.department:
         lines.append(f"🏢 {e(user.department)}")
     lines.append(f"🆔 <code>{user.tg_id}</code>")
+    if user.invited_by or user.ref_team_id:
+        # Пришёл по приглашению коллеги — команда выбрана за него ещё до анкеты.
+        lines.append("🔗 По приглашению" + (f" (tg id {user.invited_by})" if user.invited_by else ""))
     if user.rules_accepted_at:
         lines.append(f"📜 Правила приняты: {user.rules_accepted_at.strftime('%d.%m.%Y %H:%M')} UTC")
     lines.append("")
@@ -991,3 +1038,54 @@ MOTIVATION = [
 
 def motivation(index: int) -> str:
     return f"{px('heart')} " + voice(MOTIVATION[index % len(MOTIVATION)])
+
+
+# Еженедельная рассылка: свой текст на каждую неделю марафона, дальше — по кругу.
+WEEKLY_THEMES = [
+    ("Неделя началась", "Впереди семь дней и четыре дела на выбор. Возьми хотя бы одно — "
+                        "и неделя уже не зря."),
+    ("Середина марафона", "Первая неделя показала: сложного тут ничего нет. "
+                          "Второй заход обычно даётся легче — и приносит команде больше."),
+    ("Финальная неделя", "Последние семь дней. Ровно столько, чтобы подтянуть команду в таблице "
+                         "и закончить марафон так, как хотелось с самого начала."),
+]
+
+WEEKLY_CLOSERS = [
+    "Одно дело в неделю — это минимум. Всё, что сверх, идёт команде в плюс.",
+    "Не жди идеального момента: он обычно наступает сразу после того, как начал.",
+    "Твои баллы — это баллы команды. Без тебя таблица не сдвинется.",
+    "Есть дела на десять минут. Открой задания и посмотри, что подходит именно сегодня.",
+]
+
+
+def weekly_motivation(week: int | None, tasks: list[Task], rows: list[dict], index: int) -> str:
+    """Еженедельная мотивация всем участникам: что открыто, сколько можно взять, как идут дела."""
+    if week is None:
+        return (
+            "💚 <b>Марафон добрых дел</b>\n\n"
+            "Задания этой недели ещё не открыты — сотрудник P&amp;C включит их, "
+            "и бот сразу пришлёт анонс.\n\n"
+            + voice("Пока можно заглянуть в правила и позвать коллег в свою команду — "
+                    "вместе марафон идёт веселее.")
+        )
+    title, lead = WEEKLY_THEMES[(week - 1) % len(WEEKLY_THEMES)]
+    lines = [f"💚 <b>{title}</b>", f"<i>Неделя {week} · до {_date_ru(settings.week_deadline(week).date())}</i>", "",
+             lead, ""]
+    if tasks:
+        lines.append(rule("Что открыто"))
+        for i, task in enumerate(tasks, 1):
+            lines.append(f"{i}. {e(task.emoji)} {e(task.title)} — <b>{task.points_label}</b> б.")
+        total = week_max_points(tasks)
+        lines.append("")
+        lines.append(f"Всего за неделю можно взять <b>{num(total)}</b> "
+                     f"{plural(total, 'балл', 'балла', 'баллов')}.")
+        lines.append("")
+    if rows:
+        medals = ["🥇", "🥈", "🥉"]
+        lines.append(rule("Тройка лидеров"))
+        for i, r in enumerate(rows[:3]):
+            lines.append(f"{medals[i]} {e(r['team'].emoji)} {e(r['team'].name)} — {r['points']} б.")
+        lines.append("")
+    lines.append(voice(WEEKLY_CLOSERS[index % len(WEEKLY_CLOSERS)] +
+                       "\nЖми «Задания недели» — покажу, что осталось."))
+    return "\n".join(lines)

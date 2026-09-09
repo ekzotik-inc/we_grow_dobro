@@ -75,6 +75,27 @@ async def cb_team_card(cq: CallbackQuery) -> None:
     await answer_cq(cq)
 
 
+@router.callback_query(F.data.regexp(r"^team:invite:(\d+)$"))
+async def cb_team_invite(cq: CallbackQuery) -> None:
+    """Ссылка-приглашение в свою команду: коллега проходит анкету из двух шагов."""
+    team_id = int(cq.data.split(":")[2])
+    async with session() as s:
+        user = await load_user(s, cq.from_user)
+        if user.status != UserStatus.registered or user.team_id != team_id:
+            await answer_cq(cq, "Приглашать можно только в свою команду.", alert=True)
+            return
+        team = await services.get_team(s, team_id)
+        if team is None:
+            await answer_cq(cq, "Команда не найдена", alert=True)
+            return
+        members = len(services.team_active_members(team))
+        me = await cq.bot.me()
+        link = services.invite_link(me.username, team.id, user.tg_id)
+        text = texts.invite_screen(team, link, members)
+    await edit(cq, text, kb.team_invite_kb(team.id, link))
+    await answer_cq(cq)
+
+
 # ---------- help from P&C ----------
 
 @router.callback_query(F.data == "help")

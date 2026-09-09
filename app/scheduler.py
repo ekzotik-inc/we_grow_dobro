@@ -38,6 +38,32 @@ async def motivation_job(bot: Bot) -> None:
     log.info("motivation sent to %s users", n)
 
 
+async def weekly_motivation_job(bot: Bot) -> None:
+    """Еженедельная мотивация всем участникам — раз в неделю, в заданный день и час.
+
+    Идёт независимо от того, включены ли недели: если заданий ещё нет, участник получает
+    короткое «скоро начнём», а не тишину.
+    """
+    if settings.now().weekday() != settings.weekly_weekday:
+        return
+    async with SessionLocal() as s:
+        kind = f"weekly:{settings.today().isoformat()}"
+        if await _already_sent(s, kind):
+            return
+        n = await broadcast(bot, s, await weekly_text(s), kind)
+    log.info("weekly motivation sent to %s users", n)
+
+
+async def weekly_text(s) -> str:
+    """Текст еженедельной рассылки: открытая неделя, её задания и тройка лидеров."""
+    cw = services.current_week()
+    tasks = await services.list_tasks(s, cw.number) if cw else []
+    rows = await services.leaderboard(s)
+    # Индекс завершающей фразы — по номеру недели года, чтобы формулировки не повторялись.
+    index = settings.today().isocalendar()[1]
+    return texts.weekly_motivation(cw.number if cw else None, tasks, rows, index)
+
+
 async def top_digest_job(bot: Bot) -> None:
     """Standings for everyone, twice a week."""
     if not services.open_weeks():
@@ -142,6 +168,9 @@ def build_scheduler(bot: Bot) -> AsyncIOScheduler:
     sch.add_job(admin_digest_job, CronTrigger(hour=18, minute=0), args=[bot], id="digest")
     sch.add_job(motivation_job, CronTrigger(hour=settings.motivation_hour, minute=0), args=[bot], id="motivation")
     sch.add_job(top_digest_job, CronTrigger(hour=settings.top_hour, minute=0), args=[bot], id="top")
+    sch.add_job(weekly_motivation_job, CronTrigger(day_of_week=settings.weekly_weekday,
+                                                   hour=settings.weekly_hour, minute=0),
+                args=[bot], id="weekly")
     # Интервал по самому частому засыпанию: база — 5 минут, сервис — 15.
     minutes = settings.db_keepalive_minutes or 10
     sch.add_job(keepalive_job, IntervalTrigger(minutes=minutes), args=[bot], id="keepalive")
