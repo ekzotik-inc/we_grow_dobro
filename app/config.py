@@ -98,7 +98,7 @@ class Settings:
     web_host: str = os.getenv("WEB_HOST", "0.0.0.0")
     # PORT is what Render (and most PaaS) assigns; binding anything else makes the host declare the service dead.
     web_port: int = int(os.getenv("PORT") or os.getenv("WEB_PORT") or "8080")
-    tz_name: str = os.getenv("TZ", "Asia/Almaty")
+    tz_name: str = os.getenv("TZ", "Asia/Tashkent")
     team_size: int = int(os.getenv("TEAM_SIZE", "5"))
     marathon_title: str = os.getenv("MARATHON_TITLE", "Марафон добрых дел «We Grow Dobro»")
     pc_contact: str = os.getenv("PC_CONTACT", "сотрудник P&C")

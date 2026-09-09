@@ -356,7 +356,7 @@ async def cb_users(cq: CallbackQuery, state: FSMContext) -> None:
 async def cb_user_search(cq: CallbackQuery, state: FSMContext) -> None:
     await state.set_state(AdminFlow.user_search)
     await state.update_data({ANCHOR_KEY: cq.message.message_id})
-    await edit(cq, "🔍 Напиши фамилию, имя или @username участника:", kb.cancel_kb("adm:users:0"))
+    await edit(cq, "🔍 Напиши фамилию, имя, @username, телефон или Telegram id участника:", kb.cancel_kb("adm:users:0"))
     await answer_cq(cq)
 
 
@@ -366,7 +366,15 @@ async def user_search_text(message: Message, state: FSMContext) -> None:
     await delete_quietly(message)
     async with session() as s:
         users = await services.list_participants(s)
-    found = [u for u in users if q in (u.full_name or "").casefold() or q in (u.username or "").casefold() or q == str(u.tg_id)]
+    # Ищем и по телефону: у P&C он часто единственное, что есть под рукой.
+    digits = "".join(c for c in q if c.isdigit())
+    found = [
+        u for u in users
+        if q in (u.full_name or "").casefold()
+        or q in (u.username or "").casefold()
+        or q == str(u.tg_id)
+        or (digits and len(digits) >= 5 and digits in "".join(c for c in (u.phone or "") if c.isdigit()))
+    ]
     await state.clear()
     if not found:
         await edit_anchor(message.bot, message.chat.id, state, f"🔍 По запросу «{texts.e(message.text)}» никого не нашлось.", kb.back_kb("adm:users:0", "👥 Участники"))
@@ -377,7 +385,10 @@ async def user_search_text(message: Message, state: FSMContext) -> None:
 async def _user_card(s, u) -> str:
     pts = await services.user_points(s, u.id)
     subs = await services.user_submissions(s, u.id)
-    lines = [f"👤 <b>{texts.e(u.display_name)}</b>" + (f" (@{texts.e(u.username)})" if u.username else ""), f"<code>{u.tg_id}</code>"]
+    lines = [f"👤 <b>{texts.e(u.display_name)}</b>" + (f" (@{texts.e(u.username)})" if u.username else "")]
+    # Телефон — то, ради чего его и собирали: по нему P&C связывается с участником.
+    lines.append(f"📱 {'<code>' + texts.e(u.phone) + '</code>' if u.phone else 'телефон не указан'}")
+    lines.append(f"🆔 <code>{u.tg_id}</code>")
     if u.department:
         lines.append(f"🏢 {texts.e(u.department)}")
     if u.city:

@@ -1,9 +1,14 @@
 # Чертёж развёртывания на Render (https://render.com/docs/blueprint-spec).
 # Как применить: Render → New → Blueprint → выбрать этот репозиторий → Apply.
 #
-# База данных здесь НЕ создаётся: Render разрешает только одну бесплатную базу на аккаунт,
-# и её удаляют через 30 дней. Вместо неё берём бесплатный Postgres на neon.tech (он бессрочный)
-# и вставляем строку подключения в DATABASE_URL при развёртывании — см. README.
+# База — платный Postgres на Render: фиксированная цена, не засыпает, без квот по времени.
+# Строка подключения подставляется автоматически из блока databases ниже.
+databases:
+  - name: we-grow-dobro-db
+    databaseName: dobro
+    user: dobro
+    plan: basic-256mb          # минимальный платный тариф; хватает с запасом
+    region: frankfurt
 services:
   - type: web
     name: we-grow-dobro
@@ -19,8 +24,10 @@ services:
       - key: PYTHON_VERSION
         value: "3.12.6"
       # sync: false — Render спросит значение при развёртывании и не сохранит его в git
-      - key: DATABASE_URL      # строка подключения из Neon, целиком, вместе с ?sslmode=require
-        sync: false
+      - key: DATABASE_URL      # подставляется из базы выше, вручную вписывать не нужно
+        fromDatabase:
+          name: we-grow-dobro-db
+          property: connectionString
       - key: BOT_TOKEN         # токен от @BotFather
         sync: false
       - key: ADMIN_IDS         # владелец бота
@@ -34,7 +41,7 @@ services:
       - key: PHONE_COUNTRY_CODE  # код страны для номеров, набранных без него
         value: "998"
       - key: TZ
-        value: Asia/Almaty
+        value: Asia/Tashkent
       - key: PREMIUM_EMOJI   # 1 = премиум-эмодзи; нужен Telegram Premium у владельца бота
         value: "1"
       - key: VOICE_NAME      # имя, от которого бот говорит в цитатах
@@ -45,5 +52,5 @@ services:
         value: "11"
       - key: TOP_HOUR          # час публикации топа (среда и воскресенье)
         value: "19"
-      - key: DB_EXPIRES_AT     # с Neon оставьте пустым: база бессрочная
+      - key: DB_EXPIRES_AT     # у платной базы Render срока нет — оставляем пустым
         value: ""
