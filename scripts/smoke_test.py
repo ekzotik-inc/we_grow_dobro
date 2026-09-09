@@ -255,6 +255,14 @@ async def check_manual_results() -> None:
             await services.set_week_open(s, w, False)
         await s.commit()
 
+    # разбор ввода: число и причина одним сообщением, число с пробелом внутри
+    from app.bot.handlers.results import _parse_amount
+
+    assert _parse_amount("200") == (200, "")
+    assert _parse_amount("200 помощь в организации") == (200, "помощь в организации")
+    assert _parse_amount("1 500 подарки") == (1500, "подарки"), "число с пробелом должно читаться целиком"
+    assert _parse_amount("abc") == (0, "")
+
     # доступ: только владелец, P&C и участники — мимо
     from app.bot.handlers.results import IsOwner
 

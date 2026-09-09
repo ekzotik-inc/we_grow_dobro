@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import logging
+import re
 
 from aiogram import F, Router
 from aiogram.filters import BaseFilter, Command
@@ -164,39 +165,39 @@ async def cb_amount(cq: CallbackQuery, state: FSMContext) -> None:
     await state.set_state(ResultsFlow.amount)
     await state.update_data({ANCHOR_KEY: cq.message.message_id, "uid": int(uid), "sign": 1 if kind == "add" else -1})
     word = "начислить" if kind == "add" else "списать"
-    await edit(cq, f"✍️ <b>Сколько баллов {word}?</b>\n<i>{texts.e(user.display_name)}</i>\n\n"
-                   "Напиши число сообщением, например <code>200</code>.",
-               kb.results_back_kb(f"res:user:{uid}"))
+    await edit(
+        cq,
+        f"✍️ <b>Сколько баллов {word}?</b>\n<i>{texts.e(user.display_name)}</i>\n\n"
+        "Напиши сообщением число и, если хочешь, причину сразу:\n"
+        "<code>200</code> или <code>200 помощь в организации</code>\n\n"
+        "Причину увидит участник. Без неё запишу «корректировка администратора».",
+        kb.results_back_kb(f"res:user:{uid}"),
+    )
     await answer_cq(cq)
 
 
-@router.message(ResultsFlow.amount, F.text)
-async def amount_text(message: Message, state: FSMContext) -> None:
-    data = await state.get_data()
-    await delete_quietly(message)
-    raw = "".join(c for c in message.text if c.isdigit())
-    if not raw or int(raw) == 0:
-        await edit_anchor(message.bot, message.chat.id, state,
-                          "⚠️ Нужно число больше нуля. Например: <code>200</code>",
-                          kb.results_back_kb(f"res:user:{data.get('uid')}"))
-        return
-    await state.update_data(amount=int(raw))
-    await state.set_state(ResultsFlow.reason)
-    sign = data.get("sign", 1)
-    word = "начисляем" if sign > 0 else "списываем"
-    await edit_anchor(message.bot, message.chat.id, state,
-                      f"✍️ <b>{int(raw)} б. — {word}</b>\n\n"
-                      "Напиши причину сообщением: участник увидит её в уведомлении.",
-                      kb.results_back_kb(f"res:user:{data.get('uid')}"))
+DEFAULT_REASON = "корректировка администратора"
 
 
-@router.message(ResultsFlow.reason, F.text)
-async def reason_text(message: Message, state: FSMContext) -> None:
-    data = await state.get_data()
-    reason = message.text.strip()[:200]
-    await delete_quietly(message)
-    uid, amount, sign = data.get("uid"), data.get("amount", 0), data.get("sign", 1)
-    delta = amount * sign
+_AMOUNT_RE = re.compile(r"^\s*[+-]?\s*(\d[\d\s\u00a0]*)")
+
+
+def _parse_amount(raw: str) -> tuple[int, str]:
+    """Из «200 помощь в организации» получаем и число, и причину.
+
+    Одно сообщение вместо двух: раньше баллы применялись только после отдельной причины,
+    и если её не написать, начисление просто не происходило. «1 500» с пробелом внутри
+    числа тоже читается правильно.
+    """
+    match = _AMOUNT_RE.match(raw)
+    if not match:
+        return 0, ""
+    digits = "".join(c for c in match.group(1) if c.isdigit())
+    reason = raw[match.end():].strip(" .,:;-—\t")
+    return int(digits or 0), reason
+
+
+async def _apply_adjustment(message: Message, state: FSMContext, uid: int, delta: int, reason: str) -> None:
     async with session() as s:
         user = await services.get_user_by_id(s, uid)
         if user is None:
@@ -211,13 +212,61 @@ async def reason_text(message: Message, state: FSMContext) -> None:
             return
         await s.commit()
         tg_id, name = user.tg_id, user.display_name
+        subs = await services.user_submissions(s, uid)
+        user = await services.get_user_by_id(s, uid)
+        card = texts.results_user(user, subs, total)
+        markup = kb.results_user_kb(user, [x for x in subs if x.status == SubmissionStatus.approved])
+
     await _notify(message.bot, type("U", (), {"tg_id": tg_id})(), texts.push_points_adjusted(delta, reason, total))
     await state.clear()
     sign_word = "начислено" if delta > 0 else "списано"
+    # Показываем обновлённую карточку: сразу видно, что баллы действительно на месте.
+    head = (f"✅ <b>{abs(delta)} б. {sign_word}</b> · {texts.e(name)} — теперь <b>{texts.num(total)}</b> б.\n"
+            f"<i>{texts.e(reason)} · участник уведомлён</i>\n\n")
+    await edit_anchor(message.bot, message.chat.id, state, head + card, markup)
+
+
+@router.message(ResultsFlow.amount, F.text)
+async def amount_text(message: Message, state: FSMContext) -> None:
+    data = await state.get_data()
+    uid, sign = data.get("uid"), data.get("sign", 1)
+    await delete_quietly(message)
+    amount, reason = _parse_amount(message.text)
+    if amount <= 0:
+        await edit_anchor(message.bot, message.chat.id, state,
+                          "⚠️ Нужно число больше нуля. Например: <code>200</code> "
+                          "или <code>200 помощь в организации</code>",
+                          kb.results_back_kb(f"res:user:{uid}"))
+        return
+    if reason:
+        await _apply_adjustment(message, state, uid, amount * sign, reason)
+        return
+    # Причины нет — предлагаем написать её или применить без неё одной кнопкой.
+    await state.update_data(amount=amount)
+    await state.set_state(ResultsFlow.reason)
+    word = "начисляем" if sign > 0 else "списываем"
     await edit_anchor(message.bot, message.chat.id, state,
-                      f"✅ <b>{abs(delta)} б. {sign_word}</b>\n{texts.e(name)} — теперь {texts.num(total)} б.\n\n"
-                      f"<i>{texts.e(reason)}</i>\n\nУчастник уведомлён.",
-                      kb.results_back_kb(f"res:user:{uid}"))
+                      f"✍️ <b>{amount} б. — {word}</b>\n\n"
+                      "Напиши причину сообщением — участник её увидит.\n"
+                      "Или нажми кнопку ниже, и я запишу без причины.",
+                      kb.results_reason_kb(uid))
+
+
+@router.callback_query(ResultsFlow.reason, F.data.regexp(r"^res:noreason:(\d+)$"))
+async def cb_no_reason(cq: CallbackQuery, state: FSMContext) -> None:
+    data = await state.get_data()
+    await answer_cq(cq)
+    await _apply_adjustment(cq.message, state, data.get("uid"),
+                            data.get("amount", 0) * data.get("sign", 1), DEFAULT_REASON)
+
+
+@router.message(ResultsFlow.reason, F.text)
+async def reason_text(message: Message, state: FSMContext) -> None:
+    data = await state.get_data()
+    reason = message.text.strip()[:200] or DEFAULT_REASON
+    await delete_quietly(message)
+    await _apply_adjustment(message, state, data.get("uid"),
+                            data.get("amount", 0) * data.get("sign", 1), reason)
 
 
 # ---------- отмена зачёта ----------

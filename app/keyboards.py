@@ -316,6 +316,14 @@ def results_team_kb(team: Team, members: list[User]) -> InlineKeyboardMarkup:
     return kb.as_markup()
 
 
+def results_reason_kb(user_id: int) -> InlineKeyboardMarkup:
+    """Причину можно не писать — иначе начисление зависало бы на этом шаге."""
+    kb = InlineKeyboardBuilder()
+    kb.row(_btn("✅ Начислить без причины", f"res:noreason:{user_id}", style="primary"))
+    kb.row(_btn("⬅️ Отмена", f"res:user:{user_id}"))
+    return kb.as_markup()
+
+
 def results_confirm_kb(action: str, target_id: int, back: str) -> InlineKeyboardMarkup:
     """Подтверждение необратимого действия: обнуления результатов."""
     kb = InlineKeyboardBuilder()
