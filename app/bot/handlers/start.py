@@ -35,6 +35,7 @@ async def render_menu(s, user) -> tuple[str, object]:
     ws["approved_total"] = len(
         [x for x in await services.user_submissions(s, user.id) if x.status.value == "approved"]
     )
+    ws["my_rank"], ws["total_users"] = await services.participant_rank(s, user.id)
     pending = await services.pending_count(s) if user.is_admin else 0
     return texts.main_menu(user, my_points, team_points, rank, ws), kb.main_menu_kb(user, pending)
 

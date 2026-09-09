@@ -628,6 +628,23 @@ async def segment_users(s, code: str, arg: str | None = None) -> list[User]:
     return []
 
 
+async def participant_rank(s, user_id: int) -> tuple[int | None, int]:
+    """(place in the overall standings, number of participants ranked). Ties share a place."""
+    points = await user_points_map(s)
+    scores = []
+    for u in await list_participants(s):
+        if u.status == UserStatus.registered:
+            scores.append((u.id, points.get(u.id, 0)))
+    if not scores:
+        return None, 0
+    scores.sort(key=lambda r: -r[1])
+    mine = dict(scores).get(user_id)
+    if mine is None:
+        return None, len(scores)
+    place = sum(1 for _, pts in scores if pts > mine) + 1
+    return place, len(scores)
+
+
 async def top_participants(s, limit: int = 5) -> list[tuple[str, str, int]]:
     """Strongest participants: (name, team, points). Disqualified people are left out."""
     points = await user_points_map(s)

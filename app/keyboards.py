@@ -100,8 +100,10 @@ def main_menu_kb(user: User, pending: int = 0) -> InlineKeyboardMarkup:
 
     # The primary button is whatever the participant should do next.
     if not in_team:
-        kb.row(_btn("🌱 Выбрать команду", "teams", style="primary"))
-        kb.row(_btn("📋 Задания недели", "tasks"))
+        # A participant never picks a team — P&C assigns it, so the menu offers the tasks and the
+        # way to reach P&C instead of a picker that would do nothing.
+        kb.row(_btn("📋 Задания недели", "tasks", style="primary"))
+        kb.row(_btn("🌱 Команды марафона", "teams"))
     elif started:
         kb.row(_btn("📋 Задания недели", "tasks", style="primary"))
         kb.row(_btn("🌱 Моя команда", f"team:{user.team_id}"))
