@@ -109,30 +109,37 @@ def _chat_id(event) -> int | None:
     return None
 
 
+# Пробуждение уснувшей базы занимает до десяти секунд, поэтому пауз три и они растут.
+_RETRY_DELAYS = (1, 3, 6)
+
+
 async def db_retry(handler, event, data):
-    """Повторить действие, если база на бесплатном тарифе спала и не ответила с первого раза.
+    """Повторить действие, если база спала и не ответила с первого раза.
 
     Без этого первое сообщение после паузы терялось молча: участник отправлял номер,
-    запрос падал, а он видел тишину и думал, что бот сломан.
+    запрос падал, а он видел тишину и думал, что бот сломан. На платном тарифе база
+    не засыпает и повторы просто не понадобятся.
     """
-    try:
-        return await handler(event, data)
-    except Exception as ex:  # noqa: BLE001
-        if not _is_db_hiccup(ex):
-            raise
-        log.warning("База не ответила (%s), повторяю через 2 с", type(ex).__name__)
-        await asyncio.sleep(2)
+    last: Exception | None = None
+    for attempt, delay in enumerate((0, *_RETRY_DELAYS)):
+        if delay:
+            await asyncio.sleep(delay)
         try:
             return await handler(event, data)
-        except Exception as ex2:  # noqa: BLE001
-            log.error("Повтор не помог: %s", ex2)
-            chat_id = _chat_id(event)
-            bot = data.get("bot")
-            if chat_id and bot:
-                with contextlib.suppress(Exception):
-                    await bot.send_message(
-                        chat_id,
-                        "⏳ База данных просыпается — не успел обработать. "
-                        "Повтори последнее действие, пожалуйста.",
-                    )
-            return None
+        except Exception as ex:  # noqa: BLE001
+            if not _is_db_hiccup(ex):
+                raise
+            last = ex
+            log.warning("База не ответила (%s), попытка %s из %s",
+                        type(ex).__name__, attempt + 1, len(_RETRY_DELAYS) + 1)
+    log.error("База так и не ответила: %s", last)
+    chat_id = _chat_id(event)
+    bot = data.get("bot")
+    if chat_id and bot:
+        with contextlib.suppress(Exception):
+            await bot.send_message(
+                chat_id,
+                "⏳ База данных просыпается — не успел обработать. "
+                "Повтори последнее действие, пожалуйста.",
+            )
+    return None

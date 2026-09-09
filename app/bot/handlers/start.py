@@ -1,6 +1,8 @@
 """/start, rules, registration FSM and the main menu."""
 from __future__ import annotations
 
+import contextlib
+
 from aiogram import F, Router
 from aiogram.filters import Command, CommandStart
 from aiogram.fsm.context import FSMContext
@@ -180,6 +182,21 @@ def _clean_phone(raw: str) -> str | None:
     return f"+{digits}"
 
 
+async def _drop_phone_keyboard(message: Message, state: FSMContext, note: str) -> None:
+    """Снять клавиатуру «Поделиться номером».
+
+    Снимается только отправкой сообщения с ReplyKeyboardRemove, и удалять его нельзя:
+    Telegram не успевает применить снятие, и кнопка остаётся висеть в чате навсегда.
+    """
+    await message.answer(note, reply_markup=ReplyKeyboardRemove())
+    data = await state.get_data()
+    prompt_id = data.get("phone_prompt_id")
+    if prompt_id:
+        with contextlib.suppress(Exception):
+            await message.bot.delete_message(message.chat.id, prompt_id)
+        await state.update_data(phone_prompt_id=None)
+
+
 async def _phone_accepted(message: Message, state: FSMContext, phone: str) -> None:
     data = await state.get_data()
     draft = data.get("draft", {})
@@ -192,9 +209,9 @@ async def _phone_accepted(message: Message, state: FSMContext, phone: str) -> No
             draft["full_name"] = user.full_name
     await state.update_data(draft=draft)
     await state.set_state(Registration.team)
-    # Take the reply keyboard away: the rest of the bot is inline only.
-    closer = await message.answer("✓", reply_markup=ReplyKeyboardRemove())
-    await delete_quietly(closer)
+
+    await _drop_phone_keyboard(message, state, f"✅ <b>Номер принят:</b> {texts.e(phone)}")
+
     async with session() as s:
         rows = await services.leaderboard(s)
     await edit_anchor(message.bot, message.chat.id, state,
@@ -223,6 +240,7 @@ async def reg_phone_contact(message: Message, state: FSMContext) -> None:
     await state.update_data(draft=draft)
     if not has_name:
         # Имя ещё не введено — остаёмся на первом шаге, но номер уже сохранён.
+        await _drop_phone_keyboard(message, state, f"✅ <b>Номер принят:</b> {texts.e(phone)}")
         await edit_anchor(message.bot, message.chat.id, state,
                           texts.registration_step("full_name", draft)
                           + "\n\n✅ Номер сохранил. Осталось имя и фамилия.",
@@ -328,8 +346,21 @@ async def reg_team_pick(cq: CallbackQuery, state: FSMContext) -> None:
     await answer_cq(cq)
 
 
+async def _cleanup_after_registration(cq: CallbackQuery, state: FSMContext) -> None:
+    """Страховка: если клавиатура номера почему-то осталась, снимаем её при отправке заявки."""
+    data = await state.get_data()
+    if not data.get("phone_prompt_id"):
+        return
+    with contextlib.suppress(Exception):
+        m = await cq.bot.send_message(cq.message.chat.id, "✅ Готово", reply_markup=ReplyKeyboardRemove())
+        await cq.bot.delete_message(cq.message.chat.id, data["phone_prompt_id"])
+        await state.update_data(phone_prompt_id=None)
+        return m
+
+
 @router.callback_query(F.data == "reg:confirm")
 async def reg_confirm(cq: CallbackQuery, state: FSMContext) -> None:
+    await _cleanup_after_registration(cq, state)
     data = await state.get_data()
     draft = data.get("draft", {})
     if not draft.get("full_name"):
