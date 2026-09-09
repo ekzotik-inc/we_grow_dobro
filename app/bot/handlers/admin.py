@@ -433,6 +433,46 @@ async def dq_reason(message: Message, state: FSMContext) -> None:
     await edit_anchor(message.bot, message.chat.id, state, "🚫 Участник дисквалифицирован.\n\n" + text, kb.admin_user_kb(u))
 
 
+@router.callback_query(F.data.regexp(r"^adm:del:(\d+)$"))
+async def cb_user_delete(cq: CallbackQuery, state: FSMContext) -> None:
+    """Полное удаление участника — сначала показываем, что именно исчезнет."""
+    await state.clear()
+    uid = int(cq.data.split(":")[2])
+    async with session() as s:
+        u = await services.get_user_by_id(s, uid)
+        if u is None:
+            await answer_cq(cq, "Участник не найден", alert=True)
+            return
+        subs = len(await services.user_submissions(s, u.id))
+        points = await services.user_points(s, u.id)
+        text = texts.user_delete_confirm(u, subs, points)
+    await edit(cq, text, kb.user_delete_confirm_kb(u))
+    await answer_cq(cq)
+
+
+@router.callback_query(F.data.regexp(r"^adm:del_ok:(\d+)$"))
+async def cb_user_delete_ok(cq: CallbackQuery, state: FSMContext) -> None:
+    await state.clear()
+    uid = int(cq.data.split(":")[2])
+    async with session() as s:
+        u = await services.get_user_by_id(s, uid)
+        if u is None:
+            await answer_cq(cq, "Участник не найден", alert=True)
+            return
+        if u.tg_id == cq.from_user.id:
+            await answer_cq(cq, "Себя удалить нельзя.", alert=True)
+            return
+        info = await services.delete_user(s, u)
+        await s.commit()
+    # Участник должен понимать, что произошло, и знать, что может вернуться.
+    try:
+        await cq.bot.send_message(info["tg_id"], texts.push_deleted())
+    except Exception:  # noqa: BLE001
+        pass
+    await edit(cq, texts.user_deleted(info), kb.back_kb("adm:users:0", "⬅️ Участники"))
+    await answer_cq(cq, "Участник удалён")
+
+
 @router.callback_query(F.data.regexp(r"^adm:reinstate:(\d+)$"))
 async def cb_reinstate(cq: CallbackQuery) -> None:
     uid = int(cq.data.split(":")[2])

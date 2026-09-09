@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from sqlalchemy import func, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.orm import selectinload
 
 from .config import settings
@@ -216,6 +216,27 @@ async def list_pc_tg_ids(s) -> set[int]:
     rows = (await s.execute(select(User.tg_id).where(User.is_pc.is_(True)))).scalars()
     ids.update(rows)
     return ids or await list_admin_tg_ids(s)  # nobody marked as P&C yet: fall back to the panel
+
+
+async def delete_user(s, user: User) -> dict:
+    """Полностью убрать участника из бота, чтобы он мог зарегистрироваться заново.
+
+    Удаляются отчёты и записи о баллах — в командном зачёте его результатов больше нет.
+    Возвращает, что именно было удалено: это показывается админу перед подтверждением
+    и в отчёте о выполнении.
+    """
+    subs = list((await s.execute(select(Submission).where(Submission.user_id == user.id))).scalars())
+    points = await user_points(s, user.id)
+    tg_id, name = user.tg_id, user.display_name
+
+    # Капитанство снимаем вручную: ссылка на users.id живёт без внешнего ключа.
+    for team in (await s.execute(select(Team).where(Team.captain_id == user.id))).scalars():
+        team.captain_id = None
+    await s.execute(delete(PointsLog).where(PointsLog.user_id == user.id))
+    await s.execute(delete(Submission).where(Submission.user_id == user.id))
+    await s.delete(user)
+    await s.flush()
+    return {"tg_id": tg_id, "name": name, "submissions": len(subs), "points": points}
 
 
 async def disqualify(s, user: User, reason: str, actor_tg_id: int) -> None:

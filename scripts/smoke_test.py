@@ -77,6 +77,42 @@ async def fill_steps(s, sub) -> None:
             await services.add_file(s, sub, {"type": "photo", "file_id": f"f{sub.id}-{i}", "name": None}, step=i)
 
 
+async def check_user_delete() -> None:
+    """Админ может удалить участника полностью — тот регистрируется заново с нуля."""
+    async with SessionLocal() as s:
+        u = await services.get_or_create_user(s, 5151, "todelete")
+        await services.register_user(s, u, "Удаляемый Участник", "IT", "Алматы")
+        await services.approve_user(s, u, 999)
+        rows = await services.leaderboard(s)
+        free = next((r["team"] for r in rows if len(r["members"]) < settings.team_size), None)
+        if free is not None:
+            await services.join_team(s, u, free.id)
+        await s.commit()
+        task = (await services.list_tasks(s, 1))[0]
+        sub = await services.start_submission(s, u, task, None)
+        await fill_steps(s, sub)
+        await services.send_for_review(s, sub)
+        await s.commit()
+        sub = await services.get_submission(s, sub.id)
+        await services.review_submission(s, sub, True, 999)
+        await s.commit()
+        assert await services.user_points(s, u.id) > 0
+        info = await services.delete_user(s, u)
+        await s.commit()
+        assert info["submissions"] == 1 and info["points"] > 0, info
+
+    async with SessionLocal() as s:  # свежая сессия: в базе не осталось ни следа
+        assert await services.get_user(s, 5151) is None
+        again = await services.get_or_create_user(s, 5151, "todelete")
+        await services.register_user(s, again, "Удаляемый Участник", "IT", "Алматы")
+        await s.commit()
+        assert again.status == UserStatus.pending and await services.user_points(s, again.id) == 0
+        assert not await services.user_submissions(s, again.id)
+        await services.delete_user(s, again)
+        await s.commit()
+    print("user delete ok")
+
+
 async def check_registration_resume() -> None:
     """Анкета должна переживать перезапуск бота: шаги сохраняются в базе."""
     async with SessionLocal() as s:
@@ -352,6 +388,7 @@ async def main() -> None:
 
     await check_week_switch()
     await check_registration_resume()
+    await check_user_delete()
 
     # Служебный HTTP: хостинг проверяет живость этим адресом, интерфейса больше нет.
     client = TestClient(app)

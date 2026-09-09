@@ -486,7 +486,15 @@ def admin_user_kb(u: User) -> InlineKeyboardMarkup:
     elif u.status.value == "registered":
         kb.row(_btn("🚫 Дисквалифицировать", f"adm:dq:{u.id}"))
     kb.row(_btn("🔀 Перевести в команду", f"adm:move:{u.id}"))
+    kb.row(_btn("🗑 Удалить из бота", f"adm:del:{u.id}"))
     kb.row(_btn("⬅️ Участники", "adm:users:0"), _btn("🛠 Панель", "adm"))
+    return kb.as_markup()
+
+
+def user_delete_confirm_kb(u: User) -> InlineKeyboardMarkup:
+    kb = InlineKeyboardBuilder()
+    kb.row(_btn("🗑 Да, удалить полностью", f"adm:del_ok:{u.id}"))
+    kb.row(_btn("⬅️ Отмена", f"adm:user:{u.id}"))
     return kb.as_markup()
 
 
