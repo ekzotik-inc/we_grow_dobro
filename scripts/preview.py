@@ -1,5 +1,5 @@
 """Рендер всех участнических экранов на живых данных — визуальная проверка текстов."""
-import asyncio, os, re
+import asyncio, html, os, re
 os.environ.update(BOT_TOKEN="1:x", FORCE_WEEK="1", ADMIN_IDS="999",
                   DATABASE_URL="sqlite+aiosqlite:///./data/prev.db")
 from app import emoji, services, texts, keyboards as kb
@@ -9,9 +9,12 @@ def show(title, s, markup=None):
     print("\n" + "═"*64); print(f"  {title}"); print("═"*64)
     # так это увидит участник: премиум-эмодзи -> их запасной символ, теги убраны
     out = re.sub(r'<tg-emoji emoji-id="\d+">(.*?)</tg-emoji>', r'\1', s)
-    out = out.replace("<blockquote>", "▏").replace("</blockquote>", "")
-    out = re.sub(r"</?(b|i|code)>", "", out)
+    out = out.replace("<blockquote expandable>", "▏(раскрывается) ").replace("<blockquote>", "▏")
+    out = out.replace("</blockquote>", "")
+    out = re.sub(r"</?(b|i|u|s|code|tg-spoiler)>", "", out)
+    out = html.unescape(out)          # так текст видит участник, а не как HTML-исходник
     print(out)
+    print(f"  [длина сообщения: {len(out)} симв.]" if len(out) > 700 else "", end="")
     if markup:
         print("─"*64)
         for row in markup.inline_keyboard:

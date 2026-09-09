@@ -46,6 +46,36 @@ async def reset_schema() -> None:
         await conn.run_sync(Base.metadata.drop_all)
 
 
+def check_no_plain_emoji() -> None:
+    """Every emoji the project can show must have a premium counterpart.
+
+    The bot upgrades plain emoji on the way out (app/bot/middlewares.py), so a character missing
+    from both sets is the only way a plain one could reach a participant.
+    """
+    import glob
+    import re as _re
+    from pathlib import Path
+    from app import emoji as em
+
+    pattern = _re.compile(
+        "[\U0001F000-\U0001FAFF\u2190-\u21FF\u2300-\u27BF\u2B00-\u2BFF\u2600-\u26FF]"
+        "[\ufe0f\u200d\U0001F000-\U0001FAFF]*"
+    )
+    # Typography, not emoji: these are drawn as text and must stay text.
+    typography = {"→", "←", "─", "·", "—", "▸"}
+    plain: dict[str, str] = {}
+    sources = [p for p in glob.glob("app/**/*.py", recursive=True) if not p.endswith("emoji.py")]
+    for path in sources + ["data/tasks.json"]:
+        for found in pattern.findall(Path(path).read_text(encoding="utf-8")):
+            if found.strip() and found not in typography and em._canon(found) is None:
+                plain.setdefault(found, path)
+    assert not plain, f"эмодзи без премиум-версии: {plain}"
+
+    sample = em.rich("📋 Задания ⚡ и 🏆 рейтинг")
+    assert "<tg-emoji" in sample and _re.sub(r"<tg-emoji[^>]*>.*?</tg-emoji>", "", sample).strip() == "Задания  и  рейтинг"
+    print("emoji ok: обычных эмодзи не осталось,", len(em.CHARS), "символов в наборе")
+
+
 async def check_auto_migration() -> None:
     """A release that adds a field must upgrade a database made by the previous release.
 
@@ -72,6 +102,7 @@ async def main() -> None:
     await reset_schema()
     await init_db()
     await check_auto_migration()
+    check_no_plain_emoji()
     async with SessionLocal() as s:
         tasks = await services.list_tasks(s)
         assert len(tasks) == 12, len(tasks)

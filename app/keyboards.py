@@ -166,12 +166,13 @@ def team_card_kb(team: Team, user: User, can_join: bool) -> InlineKeyboardMarkup
     return kb.as_markup()
 
 
-def team_emoji_kb() -> InlineKeyboardMarkup:
+def team_emoji_kb(cancel: str = "adm:teams") -> InlineKeyboardMarkup:
+    """Symbol picker for a new team. Labels here are a single emoji — see emoji.button_icon."""
     kb = InlineKeyboardBuilder()
     emojis = ["🌱", "🌟", "🔥", "🚀", "🦊", "🐝", "🌈", "💪", "🍀", "🦁", "🐬", "🎯"]
     for i in range(0, len(emojis), 6):
         kb.row(*[_btn(x, f"team:emoji:{x}") for x in emojis[i : i + 6]])
-    kb.row(_btn("❌ Отмена", "teams"))
+    kb.row(_btn("❌ Отмена", cancel))
     return kb.as_markup()
 
 

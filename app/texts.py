@@ -39,6 +39,17 @@ def voice(line: str) -> str:
     return f"{px('hug')} <b>{e(settings.voice_name)}</b>\n<blockquote>{line}</blockquote>"
 
 
+def quote(body: str, expandable: bool = False) -> str:
+    """A block quote. Expandable ones stay collapsed until tapped — for rules and long checklists."""
+    tag = "<blockquote expandable>" if expandable else "<blockquote>"
+    return f"{tag}{body}</blockquote>"
+
+
+def rule(title: str) -> str:
+    """A small caps-ish heading used to break a long message into readable parts."""
+    return f"<b>{title}</b>"
+
+
 def plural(n: int, one: str, few: str, many: str) -> str:
     """Russian noun agreement: 1 задание, 2 задания, 5 заданий."""
     if 11 <= n % 100 <= 14:
@@ -55,9 +66,11 @@ def e(text: str | None) -> str:
     return escape(text or "")
 
 
-RULES = f"""<b>📜 Правила марафона</b>
+RULES = f"""📜 <b>Правила марафона</b>
 
-1. Участие могут принять все сотрудники.
+<i>Коротко: три недели, четыре дела в неделю, всё подтверждает P&C.</i>
+
+<blockquote expandable>1. Участие могут принять все сотрудники.
 2. Регистрация и распределение участников осуществляется в боте.
 3. Количество участников в команде — {settings.team_size}.
 4. Если участник не может выбрать для себя команду, он обращается к сотруднику P&C, и тот помогает с распределением.
@@ -69,7 +82,7 @@ RULES = f"""<b>📜 Правила марафона</b>
 10. Минимум выполненных заданий в неделю — 1, максимум — 4.
 11. К каждому заданию даны условия зачёта. Задание считается выполненным только при выполнении всех действий.
 12. Проверкой условий (скриншоты, фото, описания) занимается сотрудник отдела P&C.
-13. При выявлении нарушений правил участник дисквалифицируется, и его результаты не учитываются в командном зачёте."""
+13. При выявлении нарушений правил участник дисквалифицируется, и его результаты не учитываются в командном зачёте.</blockquote>"""
 
 
 def welcome(user: User) -> str:
@@ -130,7 +143,7 @@ def main_menu(user: User, my_points: int, team_points: int | None, team_rank: in
         lines.append(f"🌱 Команда: <b>{e(user.team.emoji)} {e(user.team.name)}</b>{place}")
         lines.append(f"{px('bolt')} Баллы команды: <b>{team_points or 0}</b>")
     else:
-        lines.append("🌱 Команда: пока не выбрана")
+        lines.append("🌱 Команда: <i>назначает P&amp;C</i>")
 
     approved = (week_stats or {}).get("approved_total", 0)
     lines.append(
@@ -150,7 +163,7 @@ def main_menu(user: User, my_points: int, team_points: int | None, team_rank: in
         if user.team:
             line = "Команда есть, правила знаешь — ждём старта. Осталось совсем немного!"
         else:
-            line = "Успей выбрать команду до старта — без неё задания не открыть."
+            line = "Команду вот-вот назначит P&C — без неё задания не открыть. Если хочешь в конкретную, напиши через «Помощь»."
         lines.append("")
         lines.append(voice(line))
         return "\n".join(lines)
@@ -281,14 +294,14 @@ def task_card(task: Task, sub: Submission | None) -> str:
     lines.append("")
     if task.options:
         # Full checklists live in the report screen; the card stays short enough for a photo caption.
-        lines.append("<b>Один вариант на выбор — оба сделать нельзя</b>")
+        lines.append(rule("Один вариант на выбор — оба сделать нельзя"))
         for o in task.options:
-            lines.append(f"· {e(o.title)} — {o.points} б.")
+            lines.append(f"· {e(o.title)} — <b>{o.points}</b> б.")
         lines.append("")
-        lines.append("Что приложить — покажу, когда выберешь вариант.")
+        lines.append("<i>Что приложить — покажу, когда выберешь вариант.</i>")
     else:
-        lines.append("<b>Что приложить к отчёту</b>")
-        lines.append(e(task.conditions))
+        lines.append(rule("Что приложить к отчёту"))
+        lines.append(quote(e(task.conditions), expandable=True))
     if sub and sub.status != SubmissionStatus.cancelled:
         lines.append("")
         opt = f" · {e(sub.option.title)}" if sub.option else ""
@@ -312,8 +325,8 @@ def submission_editor(sub: Submission) -> str:
     if sub.option:
         lines.append(f"Вариант: {e(sub.option.title)} — {sub.option.points} б.")
     lines.append("")
-    lines.append("<b>Что приложить</b>")
-    lines.append(e(sub.option.conditions if sub.option else task.conditions))
+    lines.append(rule("Что приложить"))
+    lines.append(quote(e(sub.option.conditions if sub.option else task.conditions), expandable=True))
     lines.append("")
 
     ok_f = "✅" if files >= need else "◻️"

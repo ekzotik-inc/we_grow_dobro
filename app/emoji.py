@@ -7,7 +7,11 @@ whole feature can be switched off at runtime without touching the texts.
 """
 from __future__ import annotations
 
+import json
 import logging
+import re
+
+from pathlib import Path
 
 from .config import settings
 
@@ -91,28 +95,111 @@ def strip(text: str) -> str:
     return re.sub(r'<tg-emoji emoji-id="\d+">(.*?)</tg-emoji>', r"\1", text)
 
 
-# --- premium emoji in inline buttons (Bot API 9.4: InlineKeyboardButton.icon_custom_emoji_id) ---
-# A button label is plain text without entities, so the emoji cannot live inside it. Instead the
-# leading character is removed and passed to Telegram as a separate icon.
-_ICON_BY_CHAR: dict[str, str] = {
-    "⚡": "bolt",
-    "📱": "phone",
-    "🚫": "blocked",
-    "🏆": "medal",
-    "🚀": "rocket",
-    "🤗": "hug",
-    "❤": "heart",
-    "🧠": "brain",
-    "💻": "laptop",
-    "😎": "cool",
-    "🤩": "star_eyes",
-    "🤝": "like",
-    "🛡": "shield",
+# ---------- the full premium sets (data/premium_emoji.json: plain character -> custom emoji id) ----------
+# Two sets from the customer: @d_code and Animated Emoji. Loaded from data so the catalogue can grow
+# without touching the code.
+def _load_chars() -> dict[str, str]:
+    path = Path(__file__).resolve().parent.parent / "data" / "premium_emoji.json"
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as ex:  # noqa: BLE001
+        log.warning("Не удалось прочитать набор премиум-эмодзи: %s", ex)
+        return {}
+
+
+CHARS: dict[str, str] = _load_chars()
+
+# A handful of emoji used in the interface are missing from both sets. Instead of leaving a plain
+# one among premium ones, each is swapped for the closest character that the sets do cover.
+SUBSTITUTES: dict[str, str] = {
+    "📋": "📝", "⚠️": "❗", "⬅️": "👈", "➡️": "👉", "🚫": "⛔️", "🗑": "❌", "🛠": "🧰",
+    "✉️": "📨", "⚙️": "🧰", "♻️": "🔄", "🙋": "✋", "🔀": "🔄", "🔒": "🔐", "🏷": "🏅",
+    "📜": "📖", "🗓": "📆", "🆔": "🪪", "🆘": "❗", "🎲": "🎯", "👕": "🎁", "📍": "🧭",
+    "🔴": "❤️", "🟢": "💚", "⚪": "🤍", "🧹": "🧼", "✓": "✅", "✔️": "✅", "◻️": "➖",
+    "○": "➖", "🥈": "🏅", "🥉": "🎖", "📢": "📣", "🔖": "🏅", "📌": "🧭", "📄": "📝",
 }
 
 
+def _canon(char: str) -> str | None:
+    """The id for a character, tolerating a missing or extra variation selector."""
+    for variant in (char, char.rstrip("\ufe0f"), char + "\ufe0f"):
+        if variant in CHARS:
+            return CHARS[variant]
+    swap = SUBSTITUTES.get(char) or SUBSTITUTES.get(char.rstrip("\ufe0f"))
+    if swap:
+        for variant in (swap, swap.rstrip("\ufe0f"), swap + "\ufe0f"):
+            if variant in CHARS:
+                return CHARS[variant]
+    return None
+
+
+def _emoji_pattern() -> re.Pattern[str]:
+    """Match every known character, with or without the trailing variation selector.
+
+    Longest first, so a multi-codepoint sequence (🙋\u200d♀️) wins over its first character.
+    """
+    known: set[str] = set()
+    for char in set(CHARS) | set(SUBSTITUTES):
+        known.add(char)
+        known.add(char.rstrip("\ufe0f"))
+        known.add(char.rstrip("\ufe0f") + "\ufe0f")
+    known.discard("")
+    ordered = sorted(known, key=len, reverse=True)
+    if not ordered:
+        return re.compile(r"(?!x)x")
+    # Never break a joined sequence (🙋\u200d♀️) apart: if the whole cluster is not in the sets,
+    # it stays plain rather than turning into a premium head with a leftover tail.
+    body = "|".join(re.escape(c) for c in ordered)
+    return re.compile(f"(?<!\u200d)(?:{body})(?!\ufe0f?\u200d)")
+
+
+_CHARS_RE = _emoji_pattern()
+_ID_TO_CHAR = {eid: char for char, eid in CHARS.items()}
+# Text already marked up, and HTML tags, must be left alone when converting plain emoji.
+_SKIP_RE = re.compile(r"<tg-emoji\b.*?</tg-emoji>|<[^>]+>", re.S)
+
+
+def rich(text: str) -> str:
+    """Turn every plain emoji into a premium one.
+
+    The project keeps ordinary characters in its texts — they stay readable in the source and are
+    the fallback when premium emoji are unavailable — and this wraps them on the way out.
+    """
+    if not text or not enabled():
+        return text
+    out, last = [], 0
+    for skip in _SKIP_RE.finditer(text):
+        out.append(_rich_plain(text[last : skip.start()]))
+        out.append(skip.group(0))
+        last = skip.end()
+    out.append(_rich_plain(text[last:]))
+    return "".join(out)
+
+
+def _rich_plain(chunk: str) -> str:
+    def swap(m: re.Match[str]) -> str:
+        char = m.group(0)
+        emoji_id = _canon(char)
+        if not emoji_id:
+            return char
+        return f'<tg-emoji emoji-id="{emoji_id}">{char}</tg-emoji>'
+
+    return _CHARS_RE.sub(swap, chunk)
+
+
+def char_for_id(emoji_id: str) -> str:
+    """The plain character behind a custom emoji id — used to restore a button label."""
+    for eid, fallback in CATALOGUE.values():
+        if eid == emoji_id:
+            return fallback
+    return _ID_TO_CHAR.get(emoji_id, "")
+
+
+# ---------- premium emoji in inline buttons (Bot API 9.4: InlineKeyboardButton.icon_custom_emoji_id) ----------
+# A button label is plain text without entities, so the emoji cannot live inside it. Instead the
+# leading character is removed and passed to Telegram as a separate icon.
 def emoji_id(name: str) -> str | None:
-    """The custom emoji id for a button icon, or None when premium emoji are unavailable."""
+    """The custom emoji id for a name from CATALOGUE, or None when premium emoji are unavailable."""
     if not enabled() or name not in CATALOGUE:
         return None
     return CATALOGUE[name][0]
@@ -121,24 +208,19 @@ def emoji_id(name: str) -> str | None:
 def button_icon(text: str) -> tuple[str | None, str]:
     """Split a button label into (custom emoji id, label without that emoji).
 
-    Returns the label untouched when the leading character has no premium counterpart or when
-    premium emoji are switched off — the plain emoji then stays in the text, as before.
+    Returns the label untouched when premium emoji are off, when the leading character has no
+    premium counterpart, or when removing it would leave the button without any text at all
+    (the team symbol picker, whose labels are a single emoji).
     """
     if not enabled() or not text:
         return None, text
-    head = text[0]
-    rest = text[1:]
-    if rest.startswith("️"):  # variation selector belongs to the emoji, not the label
-        rest = rest[1:]
-    name = _ICON_BY_CHAR.get(head)
-    if not name:
+    match = _CHARS_RE.match(text)
+    if not match:
         return None, text
-    return emoji_id(name), rest.lstrip()
-
-
-def char_for_id(emoji_id: str) -> str:
-    """The plain character behind a custom emoji id — used to restore a button label."""
-    for eid, fallback in CATALOGUE.values():
-        if eid == emoji_id:
-            return fallback
-    return ""
+    rest = text[match.end() :].lstrip()
+    if not rest:
+        return None, text
+    emoji_id_ = _canon(match.group(0))
+    if not emoji_id_:
+        return None, text
+    return emoji_id_, rest

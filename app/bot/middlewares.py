@@ -45,7 +45,31 @@ def _strip_custom_emoji(method) -> None:
             object.__setattr__(button, "icon_custom_emoji_id", None)
 
 
+def _premiumize(method) -> None:
+    """Wrap plain emoji of an outgoing message into premium ones.
+
+    Only for private chats and groups: a channel post with a custom emoji is rejected by Telegram,
+    and channel cards are rendered plain on purpose (app/bot/channels.py). Channel ids are negative,
+    user ids are positive, so the destination decides.
+    """
+    chat_id = getattr(method, "chat_id", None)
+    if not isinstance(chat_id, int) or chat_id < 0:
+        return
+    for field in _TEXT_FIELDS:
+        value = getattr(method, field, None)
+        if value:
+            object.__setattr__(method, field, emoji.rich(value))
+    for button in _buttons(method):
+        if getattr(button, "icon_custom_emoji_id", None):
+            continue
+        icon, label = emoji.button_icon(getattr(button, "text", "") or "")
+        if icon:
+            object.__setattr__(button, "text", label)
+            object.__setattr__(button, "icon_custom_emoji_id", icon)
+
+
 async def premium_emoji_guard(make_request, bot, method):
+    _premiumize(method)
     try:
         return await make_request(bot, method)
     except TelegramBadRequest as ex:
