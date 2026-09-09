@@ -85,15 +85,33 @@ async def cb_task(cq: CallbackQuery, state: FSMContext) -> None:
 
 # ---------- submission flow ----------
 
-async def _open_editor(cq_or_msg, state: FSMContext, sub) -> None:
+def _screen(sub, index: int | None = None, warning: str = ""):
+    """Экран мастера: конкретный шаг или итоговая проверка, когда шаги пройдены."""
+    steps = services.submission_steps(sub)
+    if not steps:  # задание без пошаговой инструкции — старый экран
+        return texts.submission_editor(sub), kb.submission_editor_kb(sub)
+    if index is None:
+        index = services.first_unfinished_step(sub)
+    if index >= len(steps):
+        done = [services.step_done(sub, i) for i in range(len(steps))]
+        return texts.submission_review(sub), kb.submission_review_kb(sub, steps, done, not services.steps_left(sub))
+    index = max(0, min(index, len(steps) - 1))
+    return (
+        texts.submission_step(sub, index, warning),
+        kb.submission_step_kb(sub, index, len(steps), services.step_done(sub, index)),
+    )
+
+
+async def _open_editor(cq_or_msg, state: FSMContext, sub, index: int | None = None, warning: str = "") -> None:
     await state.set_state(SubmissionFlow.collecting)
-    await state.update_data(sub_id=sub.id)
+    await state.update_data(sub_id=sub.id, step=index)
+    text, markup = _screen(sub, index, warning)
     if isinstance(cq_or_msg, CallbackQuery):
-        m = await edit(cq_or_msg, texts.submission_editor(sub), kb.submission_editor_kb(sub))
+        m = await edit(cq_or_msg, text, markup)
         if m:
             await state.update_data({ANCHOR_KEY: m.message_id})
     else:
-        await edit_anchor(cq_or_msg.bot, cq_or_msg.chat.id, state, texts.submission_editor(sub), kb.submission_editor_kb(sub))
+        await edit_anchor(cq_or_msg.bot, cq_or_msg.chat.id, state, text, markup)
 
 
 @router.callback_query(F.data.regexp(r"^sub:start:(\d+):(\d+)$"))
@@ -149,18 +167,41 @@ async def sub_file(message: Message, state: FSMContext) -> None:
         if sub is None or sub.user_id != user.id or sub.status != SubmissionStatus.draft:
             await state.clear()
             return
+        steps = services.submission_steps(sub)
+        index = data.get("step")
+        if index is None:
+            index = services.first_unfinished_step(sub)
+        warning = ""
         try:
-            await services.add_file(s, sub, file)
-            if message.caption and not sub.note:
-                await services.set_note(s, sub, message.caption)
+            if steps:
+                index = max(0, min(index, len(steps) - 1))
+                kind = steps[index].get("kind", "photo")
+                if kind == "note":
+                    # На текстовом шаге фото не подходит — говорим об этом и остаёмся здесь.
+                    await delete_quietly(message)
+                    await _open_editor(message, state, sub, index, "Здесь нужен текст сообщением, а не файл.")
+                    return
+                if kind == "file" and file["type"] == "photo":
+                    warning = "Лучше пришлите файлом, а не фотографией — так его смогут открыть."
+                await services.add_file(s, sub, file, step=index)
+                if message.caption:
+                    for i, st in enumerate(steps):
+                        if st.get("kind") == "note" and not services.step_done(sub, i):
+                            await services.save_step_answer(s, sub, i, message.caption)
+                            break
+            else:
+                await services.add_file(s, sub, file)
+                if message.caption and not sub.note:
+                    await services.set_note(s, sub, message.caption)
             await s.commit()
         except services.ServiceError as ex:
             await message.reply(str(ex))
             return
         sub = await services.get_submission(s, sub.id)
-    # Keep the chat clean: the user's upload is removed, the editor message shows the new count.
+        next_index = services.first_unfinished_step(sub) if steps else None
+    # Чат остаётся чистым: присланное убираем, экран мастера показывает следующий шаг.
     await delete_quietly(message)
-    await edit_anchor(message.bot, message.chat.id, state, texts.submission_editor(sub), kb.submission_editor_kb(sub))
+    await _open_editor(message, state, sub, next_index, warning)
 
 
 @router.message(SubmissionFlow.collecting, F.text)
@@ -173,11 +214,68 @@ async def sub_note(message: Message, state: FSMContext) -> None:
         if sub is None or sub.user_id != user.id or sub.status != SubmissionStatus.draft:
             await state.clear()
             return
-        await services.set_note(s, sub, message.text)
+        steps = services.submission_steps(sub)
+        index = data.get("step")
+        if index is None:
+            index = services.first_unfinished_step(sub)
+        if steps:
+            index = max(0, min(index, len(steps) - 1))
+            if steps[index].get("kind") != "note":
+                # Текст на шаге с фото: подсказываем, а не молчим.
+                await delete_quietly(message)
+                what = "файл" if steps[index].get("kind") == "file" else "фото"
+                await _open_editor(message, state, sub, index, f"На этом шаге нужно прислать {what}.")
+                return
+            await services.save_step_answer(s, sub, index, message.text)
+        else:
+            await services.set_note(s, sub, message.text)
         await s.commit()
         sub = await services.get_submission(s, sub.id)
+        next_index = services.first_unfinished_step(sub) if steps else None
     await delete_quietly(message)
-    await edit_anchor(message.bot, message.chat.id, state, texts.submission_editor(sub), kb.submission_editor_kb(sub))
+    await _open_editor(message, state, sub, next_index)
+
+
+@router.callback_query(F.data.regexp(r"^sub:step:(\d+):(\d+)$"))
+async def cb_sub_step(cq: CallbackQuery, state: FSMContext) -> None:
+    _, _, sub_id, index = cq.data.split(":")
+    async with session() as s:
+        user = await load_user(s, cq.from_user)
+        sub = await services.get_submission(s, int(sub_id))
+    if sub is None or sub.user_id != user.id or sub.status != SubmissionStatus.draft:
+        await answer_cq(cq, "Черновик не найден", alert=True)
+        return
+    await _open_editor(cq, state, sub, int(index))
+    await answer_cq(cq)
+
+
+@router.callback_query(F.data.regexp(r"^sub:review:(\d+)$"))
+async def cb_sub_review(cq: CallbackQuery, state: FSMContext) -> None:
+    sub_id = int(cq.data.split(":")[2])
+    async with session() as s:
+        user = await load_user(s, cq.from_user)
+        sub = await services.get_submission(s, sub_id)
+    if sub is None or sub.user_id != user.id or sub.status != SubmissionStatus.draft:
+        await answer_cq(cq, "Черновик не найден", alert=True)
+        return
+    await _open_editor(cq, state, sub, len(services.submission_steps(sub)))
+    await answer_cq(cq)
+
+
+@router.callback_query(F.data.regexp(r"^sub:redo:(\d+):(\d+)$"))
+async def cb_sub_redo(cq: CallbackQuery, state: FSMContext) -> None:
+    _, _, sub_id, index = cq.data.split(":")
+    async with session() as s:
+        user = await load_user(s, cq.from_user)
+        sub = await services.get_submission(s, int(sub_id))
+        if sub is None or sub.user_id != user.id or sub.status != SubmissionStatus.draft:
+            await answer_cq(cq, "Черновик не найден", alert=True)
+            return
+        await services.clear_step(s, sub, int(index))
+        await s.commit()
+        sub = await services.get_submission(s, sub.id)
+    await _open_editor(cq, state, sub, int(index))
+    await answer_cq(cq, "Шаг очищен — пришлите заново")
 
 
 @router.callback_query(F.data.regexp(r"^sub:pop:(\d+)$"))
@@ -215,7 +313,8 @@ async def cb_sub_preview(cq: CallbackQuery, state: FSMContext) -> None:
     await send_files(cq.bot, cq.message.chat.id, sub.files)
     # Re-send the editor below the preview so the buttons stay reachable, and drop the old one.
     await delete_quietly(cq.message)
-    m = await cq.message.answer(texts.submission_editor(sub), reply_markup=kb.submission_editor_kb(sub))
+    text, markup = _screen(sub, len(services.submission_steps(sub)) or None)
+    m = await cq.message.answer(text, reply_markup=markup)
     await state.update_data({ANCHOR_KEY: m.message_id})
 
 

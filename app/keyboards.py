@@ -220,6 +220,37 @@ def submission_editor_kb(sub: Submission) -> InlineKeyboardMarkup:
     return kb.as_markup()
 
 
+def submission_step_kb(sub: Submission, index: int, total: int, done: bool) -> InlineKeyboardMarkup:
+    """Кнопки шага: назад по шагам, к проверке — и всегда выход из мастера."""
+    kb = InlineKeyboardBuilder()
+    if done:
+        kb.row(_btn("➡️ Дальше", f"sub:step:{sub.id}:{index + 1}", style="primary"))
+        kb.row(_btn("🔄 Переснять этот шаг", f"sub:redo:{sub.id}:{index}"))
+    nav = []
+    if index > 0:
+        nav.append(_btn("⬅️ Прошлый шаг", f"sub:step:{sub.id}:{index - 1}"))
+    if index < total - 1 and done:
+        nav.append(_btn("➡️ Следующий", f"sub:step:{sub.id}:{index + 1}"))
+    if nav:
+        kb.row(*nav)
+    kb.row(_btn("📋 Все шаги", f"sub:review:{sub.id}"))
+    kb.row(_btn("❌ Отменить отчёт", f"sub:cancel:{sub.id}"), _btn("⬅️ К заданию", f"task:{sub.task_id}"))
+    return kb.as_markup()
+
+
+def submission_review_kb(sub: Submission, steps: list[dict], done: list[bool], ready: bool) -> InlineKeyboardMarkup:
+    kb = InlineKeyboardBuilder()
+    if ready:
+        kb.row(_btn("✅ Отправить на проверку", f"sub:send:{sub.id}"))
+    for i, st in enumerate(steps):
+        mark = "✅" if done[i] else "⏳"
+        kb.row(_btn(f"{mark} Шаг {i + 1}. {st['title'][:28]}", f"sub:step:{sub.id}:{i}"))
+    if sub.files:
+        kb.row(_btn("👁 Показать файлы", f"sub:preview:{sub.id}"))
+    kb.row(_btn("❌ Отменить отчёт", f"sub:cancel:{sub.id}"), _btn("⬅️ К заданию", f"task:{sub.task_id}"))
+    return kb.as_markup()
+
+
 def sub_cancel_confirm_kb(sub: Submission) -> InlineKeyboardMarkup:
     kb = InlineKeyboardBuilder()
     kb.row(_btn("🚫 Да, отменить", f"sub:cancel_ok:{sub.id}"), _btn("⬅️ Назад", f"task:{sub.task_id}"))

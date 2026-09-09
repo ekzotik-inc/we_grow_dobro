@@ -62,6 +62,21 @@ def check_no_plain_emoji() -> None:
     print("emoji ok: обычных эмодзи не осталось,", len(em.CHARS), "символов в наборе")
 
 
+async def fill_steps(s, sub) -> None:
+    """Пройти пошаговый мастер целиком: на фото-шаги кладём файл, на текстовые — ответ."""
+    steps = services.submission_steps(sub)
+    if not steps:
+        for i in range(sub.required_photos):
+            await services.add_file(s, sub, {"type": "photo", "file_id": f"f{sub.id}-{i}", "name": None})
+        await services.set_note(s, sub, "Готово")
+        return
+    for i, st in enumerate(steps):
+        if st.get("kind") == "note":
+            await services.save_step_answer(s, sub, i, f"Ответ на шаг {i + 1}")
+        else:
+            await services.add_file(s, sub, {"type": "photo", "file_id": f"f{sub.id}-{i}", "name": None}, step=i)
+
+
 async def check_week_switch() -> None:
     """Недели открывает админ. Пока ни одна не открыта, участник не видит и не сдаёт задания."""
     async with SessionLocal() as s:
@@ -113,9 +128,19 @@ async def check_auto_migration() -> None:
     async with engine.begin() as conn:
         await conn.execute(text("ALTER TABLE users DROP COLUMN phone"))
         await conn.execute(text("ALTER TABLE users DROP COLUMN is_pc"))
+        # JSON-столбец со значением по умолчанию `list` — отдельный случай, он уже ломал деплой
+        await conn.execute(text("ALTER TABLE tasks DROP COLUMN steps"))
         await conn.run_sync(_add_missing_columns)
         cols = await conn.run_sync(lambda c: {x["name"] for x in inspect(c).get_columns("users")})
+        task_cols = await conn.run_sync(lambda c: {x["name"] for x in inspect(c).get_columns("tasks")})
     assert {"phone", "is_pc"} <= cols, cols
+    assert "steps" in task_cols, task_cols
+    async with SessionLocal() as s:
+        from app.db import seed_tasks
+        await seed_tasks()
+        assert services.submission_steps.__module__  # шаги читаются из данных
+        task = (await services.list_tasks(s, 1))[0]
+        assert task.steps, "шаги задания должны восстановиться из data/tasks.json"
     async with SessionLocal() as s:
         await services.get_or_create_user(s, 424242, "migrated")
         await s.commit()
@@ -231,17 +256,16 @@ async def main() -> None:
             raise AssertionError("empty submission accepted")
         except services.ServiceError as ex:
             print("ok incomplete:", ex)
-        for i in range(t_w1.min_photos):
-            await services.add_file(s, sub, {"type": "photo", "file_id": f"f{i}", "name": None})
-        await services.set_note(s, sub, "Поблагодарил коллегу за помощь")
+        # проходим шаги мастера так же, как участник в чате
+        await fill_steps(s, sub)
+        assert services.first_unfinished_step(sub) == len(services.submission_steps(sub))
         await services.send_for_review(s, sub)
         await s.commit()
         assert sub.status == SubmissionStatus.pending
 
         # option task: only one option, correct points
         sub2 = await services.start_submission(s, u0, t_opt, t_opt.options[1].id)  # donate = 200
-        await services.add_file(s, sub2, {"type": "photo", "file_id": "x", "name": None})
-        await services.set_note(s, sub2, "перевод")
+        await fill_steps(s, sub2)
         await services.send_for_review(s, sub2)
         await s.commit()
         try:
@@ -294,9 +318,7 @@ async def main() -> None:
         # u0's rejected report was already restarted as a draft, so nobody is "rejected and not redone"
         assert await services.segment_users(s, "rejected_week") == []
         sub3 = await services.start_submission(s, users[1], t_w1, None)
-        for i in range(t_w1.min_photos):
-            await services.add_file(s, sub3, {"type": "photo", "file_id": f"z{i}", "name": None})
-        await services.set_note(s, sub3, "проба")
+        await fill_steps(s, sub3)
         await services.send_for_review(s, sub3)
         await s.commit()
         sub3 = await services.get_submission(s, sub3.id)

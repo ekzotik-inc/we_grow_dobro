@@ -375,6 +375,71 @@ def visible_weeks() -> list[int]:
     return open_weeks()
 
 
+# ---------- пошаговый отчёт ----------
+
+def submission_steps(sub: Submission) -> list[dict]:
+    """Шаги отчёта: у задания с вариантами — шаги выбранного варианта."""
+    if sub.option is not None and sub.option.steps:
+        return list(sub.option.steps)
+    return list(sub.task.steps or [])
+
+
+def step_done(sub: Submission, index: int) -> bool:
+    steps = submission_steps(sub)
+    if index >= len(steps):
+        return False
+    if steps[index].get("kind") == "note":
+        return bool((sub.answers or {}).get(str(index)))
+    return any(f.get("step") == index for f in (sub.files or []))
+
+
+def steps_left(sub: Submission) -> list[int]:
+    """Номера незаполненных обязательных шагов."""
+    return [i for i, st in enumerate(submission_steps(sub))
+            if not st.get("optional") and not step_done(sub, i)]
+
+
+def first_unfinished_step(sub: Submission) -> int:
+    """Куда вести участника: первый незаполненный шаг, иначе — экран проверки."""
+    steps = submission_steps(sub)
+    for i in range(len(steps)):
+        if not step_done(sub, i):
+            return i
+    return len(steps)
+
+
+def _sync_note(sub: Submission) -> None:
+    """Собрать ответы текстовых шагов в одну заметку — её видят P&C в карточке отчёта."""
+    steps = submission_steps(sub)
+    answers = sub.answers or {}
+    parts = []
+    for i, st in enumerate(steps):
+        if st.get("kind") == "note" and answers.get(str(i)):
+            parts.append(f"{st['title']}: {answers[str(i)]}")
+    if parts:
+        sub.note = "\n".join(parts)
+
+
+async def save_step_answer(s, sub: Submission, index: int, text: str) -> None:
+    answers = dict(sub.answers or {})
+    answers[str(index)] = text.strip()[:1000]
+    sub.answers = answers
+    _sync_note(sub)
+    sub.step = first_unfinished_step(sub)
+    await s.flush()
+
+
+async def clear_step(s, sub: Submission, index: int) -> None:
+    """Переделать шаг: убрать то, что было приложено на нём."""
+    answers = dict(sub.answers or {})
+    answers.pop(str(index), None)
+    sub.answers = answers
+    sub.files = [f for f in (sub.files or []) if f.get("step") != index]
+    _sync_note(sub)
+    sub.step = index
+    await s.flush()
+
+
 # ---------- submissions ----------
 
 def _sub_query():
@@ -436,12 +501,16 @@ async def start_submission(s, user: User, task: Task, option_id: int | None) -> 
     return await get_submission(s, sub.id)
 
 
-async def add_file(s, sub: Submission, file: dict) -> int:
+async def add_file(s, sub: Submission, file: dict, step: int | None = None) -> int:
     files = list(sub.files or [])
     if len(files) >= 10:
         raise ServiceError("Максимум 10 файлов в одном отчёте.")
+    if step is not None:
+        file = dict(file, step=step)
     files.append(file)
     sub.files = files
+    if step is not None:
+        sub.step = first_unfinished_step(sub)
     await s.flush()
     return len(files)
 
@@ -452,6 +521,10 @@ async def set_note(s, sub: Submission, note: str) -> None:
 
 
 def submission_missing(sub: Submission) -> list[str]:
+    """Чего не хватает для отправки. При пошаговой инструкции проверяем шаги поимённо."""
+    steps = submission_steps(sub)
+    if steps:
+        return [f"шаг {i + 1}: {steps[i]['title'].lower()}" for i in steps_left(sub)]
     missing = []
     photos = len(sub.files or [])
     if photos < sub.required_photos:

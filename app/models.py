@@ -102,6 +102,9 @@ class Task(Base):
     note_required: Mapped[bool] = mapped_column(Boolean, default=True)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     image: Mapped[str | None] = mapped_column(String(120))  # file in data/images
+    # Пошаговая инструкция: [{"kind": "photo"|"file"|"note", "title", "need", "help"}].
+    # Бот ведёт участника по одному шагу за раз — так понятнее, чем сплошной список условий.
+    steps: Mapped[list] = mapped_column(JSON, default=list)
 
     options: Mapped[list["TaskOption"]] = relationship(back_populates="task", order_by="TaskOption.id")
 
@@ -126,6 +129,7 @@ class TaskOption(Base):
     points: Mapped[int] = mapped_column(Integer)
     min_photos: Mapped[int] = mapped_column(Integer, default=1)
     conditions: Mapped[str] = mapped_column(Text)
+    steps: Mapped[list] = mapped_column(JSON, default=list)  # шаги именно этого варианта
 
     task: Mapped[Task] = relationship(back_populates="options")
 
@@ -141,7 +145,9 @@ class Submission(Base):
     week: Mapped[int] = mapped_column(Integer, index=True)
     status: Mapped[SubmissionStatus] = mapped_column(Enum(SubmissionStatus), default=SubmissionStatus.draft, index=True)
     note: Mapped[str | None] = mapped_column(Text)
-    files: Mapped[list] = mapped_column(JSON, default=list)  # [{"type": "photo"|"document"|"video", "file_id": str, "name": str|None}]
+    files: Mapped[list] = mapped_column(JSON, default=list)  # [{"type": "photo"|"document"|"video", "file_id": str, "name": str|None, "step": int}]
+    step: Mapped[int] = mapped_column(Integer, default=0)  # текущий шаг мастера
+    answers: Mapped[dict] = mapped_column(JSON, default=dict)  # {"номер шага": "текст участника"}
     points_awarded: Mapped[int] = mapped_column(Integer, default=0)
     review_comment: Mapped[str | None] = mapped_column(Text)
     reviewed_by: Mapped[int | None] = mapped_column(BigInteger)  # tg_id of the P&C reviewer

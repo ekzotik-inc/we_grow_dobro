@@ -45,13 +45,26 @@ async def main():
 
         tasks = await services.list_tasks(s, 1)
         t1 = next(x for x in tasks if not x.options)
+        # пошаговый мастер: показываем каждый шаг так, как его видит участник
+        topt2 = next(x for x in tasks if x.options)
         sub = await services.start_submission(s, u, t1, None)
-        show("ОТЧЁТ — ничего не приложено", texts.submission_editor(sub), kb.submission_editor_kb(sub))
-        for i in range(t1.min_photos):
-            await services.add_file(s, sub, {"type":"photo","file_id":f"f{i}","name":None})
-        await services.set_note(s, sub, "Написал открытку Марине за помощь с отчётом")
-        await s.commit(); sub = await services.get_submission(s, sub.id)
-        show("ОТЧЁТ — готов к отправке", texts.submission_editor(sub))
+        steps = services.submission_steps(sub)
+        for i, st in enumerate(steps):
+            show(f"ОТЧЁТ — ШАГ {i + 1}", texts.submission_step(sub, i),
+                 kb.submission_step_kb(sub, i, len(steps), services.step_done(sub, i)))
+            if st.get("kind") == "note":
+                await services.save_step_answer(s, sub, i, "Написал открытку Марине за помощь с отчётом")
+            else:
+                await services.add_file(s, sub, {"type":"photo","file_id":f"f{i}","name":None}, step=i)
+            await s.commit()
+            sub = await services.get_submission(s, sub.id)
+        done = [services.step_done(sub, i) for i in range(len(steps))]
+        show("ОТЧЁТ — ВСЁ СОБРАНО", texts.submission_review(sub),
+             kb.submission_review_kb(sub, steps, done, not services.steps_left(sub)))
+        sub_opt = await services.start_submission(s, u, topt2, topt2.options[0].id)
+        show("ОТЧЁТ С ВАРИАНТОМ — ШАГ 1", texts.submission_step(sub_opt, 0),
+             kb.submission_step_kb(sub_opt, 0, len(services.submission_steps(sub_opt)), False))
+        await services.cancel_submission(s, sub_opt); await s.commit()
         await services.send_for_review(s, sub); await s.commit()
         sub = await services.get_submission(s, sub.id)
         await services.review_submission(s, sub, True, 999); await s.commit()

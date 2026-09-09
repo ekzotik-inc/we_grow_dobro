@@ -50,15 +50,44 @@ async def init_db() -> None:
     await seed_tasks()
 
 
+def _default_literal(column) -> str | None:
+    """SQL-литерал значения по умолчанию, или None, если его не вывести.
+
+    `default=list` / `default=dict` у JSON-столбцов — это вызываемые значения: их нужно
+    развернуть, иначе столбец не добавится и бот упадёт на первом же запросе.
+    """
+    default = getattr(column.default, "arg", None)
+    if default is None:
+        return None
+    if callable(default):
+        try:
+            default = default(None)
+        except TypeError:
+            try:
+                default = default()
+            except Exception:  # noqa: BLE001
+                return None
+    if isinstance(default, bool):
+        return "TRUE" if default else "FALSE"
+    if isinstance(default, (int, float)):
+        return str(default)
+    if isinstance(default, (list, dict)):
+        return "'" + json.dumps(default) + "'"
+    if isinstance(default, str):
+        return "'" + default.replace("'", "''") + "'"
+    return None
+
+
 def _column_ddl(dialect, column) -> str | None:
     """`ADD COLUMN` clause for a column the live table is missing, or None if it cannot be added safely."""
     kind = column.type.compile(dialect)
     if column.nullable:
         return f"{column.name} {kind}"
-    default = getattr(column.default, "arg", None)
-    if column.server_default is not None or callable(default) or default is None:
+    if column.server_default is not None:
         return None
-    literal = "TRUE" if default is True else "FALSE" if default is False else repr(default)
+    literal = _default_literal(column)
+    if literal is None:
+        return None
     return f"{column.name} {kind} NOT NULL DEFAULT {literal}"
 
 
@@ -105,6 +134,7 @@ async def seed_tasks() -> None:
             task.min_photos = item.get("min_photos", 1)
             task.note_required = item.get("note_required", True)
             task.image = item.get("image")
+            task.steps = item.get("steps", [])
             await s.flush()
             existing = {o.code: o for o in (await s.execute(select(TaskOption).where(TaskOption.task_id == task.id))).scalars()}
             for opt in item.get("options", []):
@@ -113,5 +143,6 @@ async def seed_tasks() -> None:
                 o.points = opt["points"]
                 o.min_photos = opt.get("min_photos", 1)
                 o.conditions = opt["conditions"]
+                o.steps = opt.get("steps", [])
                 s.add(o)
         await s.commit()

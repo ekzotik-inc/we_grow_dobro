@@ -404,7 +404,93 @@ def task_card(task: Task, sub: Submission | None, number: int | None = None) -> 
     return "\n".join(lines)
 
 
+KIND_WORD = {
+    "photo": ("📷", "Пришлите фото", "фото"),
+    "file": ("📎", "Пришлите файл", "файл"),
+    "note": ("✍️", "Напишите сообщением", "текст"),
+}
+
+
+def _steps_progress(steps: list[dict], done: list[bool], current: int | None = None) -> list[str]:
+    """Полоса шагов: что уже принято, что идёт сейчас, что впереди."""
+    lines = []
+    for i, st in enumerate(steps):
+        if done[i]:
+            mark = "✅"
+        elif i == current:
+            mark = "▶️"
+        else:
+            mark = "⏳"
+        title = f"<b>{e(st['title'])}</b>" if i == current else e(st["title"])
+        lines.append(f"{mark} Шаг {i + 1}. {title}")
+    return lines
+
+
+def submission_step(sub: Submission, index: int, warning: str = "") -> str:
+    """Экран одного шага: что именно приложить и как это сделать."""
+    from . import services
+
+    steps = services.submission_steps(sub)
+    done = [services.step_done(sub, i) for i in range(len(steps))]
+    st = steps[index]
+    icon, action, what = KIND_WORD.get(st.get("kind", "photo"), KIND_WORD["photo"])
+
+    lines = [f"<b>Шаг {index + 1} из {len(steps)}</b>", f"{icon} <b>{e(st['title'])}</b>"]
+    if sub.option:
+        lines.append(f"<i>{e(sub.task.title)} · {e(sub.option.title)}</i>")
+    else:
+        lines.append(f"<i>{e(sub.task.title)}</i>")
+    lines.append("")
+    lines.append(e(st.get("need", "")))
+    lines.append("")
+    lines.append(f"{action} прямо в этот чат — я подхвачу и открою следующий шаг.")
+    if warning:
+        lines.append("")
+        lines.append(f"❗ {e(warning)}")
+    lines.append("")
+    lines.extend(_steps_progress(steps, done, index))
+    lines.append("")
+    help_text = st.get("help", "")
+    left = len([i for i in range(len(steps)) if not done[i] and i != index])
+    tail = ("Это последний шаг — дальше покажу всё вместе и отправим на проверку."
+            if left == 0 else f"После этого останется ещё {left} "
+            f"{plural(left, 'шаг', 'шага', 'шагов')}. Идём по одному, спешить некуда.")
+    lines.append(voice((help_text + "\n" if help_text else "") + tail))
+    return "\n".join(lines)
+
+
+def submission_review(sub: Submission) -> str:
+    """Итог перед отправкой: что собрано на каждом шаге."""
+    from . import services
+
+    steps = services.submission_steps(sub)
+    answers = sub.answers or {}
+    lines = ["<b>Отчёт готов</b>", f"{e(sub.task.emoji)} <b>{e(sub.task.title)}</b>"]
+    if sub.option:
+        lines.append(f"<i>вариант: {e(sub.option.title)} — {sub.option.points} б.</i>")
+    lines.append("")
+    for i, st in enumerate(steps):
+        ok = services.step_done(sub, i)
+        lines.append(f"{'✅' if ok else '⏳'} <b>Шаг {i + 1}. {e(st['title'])}</b>")
+        if st.get("kind") == "note":
+            lines.append(f"<i>{e(answers.get(str(i), 'пока пусто'))}</i>")
+        else:
+            n = len([f for f in (sub.files or []) if f.get("step") == i])
+            lines.append(f"<i>{'приложено: ' + str(n) if n else 'пока пусто'}</i>")
+        lines.append("")
+
+    missing = services.steps_left(sub)
+    if missing:
+        nums = ", ".join(str(i + 1) for i in missing)
+        lines.append(voice(f"Не хватает шагов: {nums}. Нажми на нужный шаг ниже и дошли, чего не хватает."))
+    else:
+        lines.append(voice(f"Всё на месте. Жми «Отправить на проверку» — дальше смотрит P&C {plain('rocket')}\n"
+                           "Если что-то захочешь переснять, шаг можно открыть заново."))
+    return "\n".join(lines)
+
+
 def submission_editor(sub: Submission) -> str:
+    """Старый вид отчёта — для заданий, у которых ещё не описаны шаги."""
     task = sub.task
     files = len(sub.files or [])
     need = sub.required_photos
