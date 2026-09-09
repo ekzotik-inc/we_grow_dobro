@@ -6,7 +6,7 @@ import logging
 from pathlib import Path
 
 from aiogram import F, Router
-from aiogram.filters import Command
+from aiogram.filters import BaseFilter, Command
 from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, FSInputFile, Message
 
@@ -24,8 +24,12 @@ log = logging.getLogger(__name__)
 router = Router(name="admin")
 
 
-class IsAdmin:
+class IsAdmin(BaseFilter):
     """Панель открыта только тем, кто перечислен в ADMIN_IDS или PC_IDS.
+
+    Обязательно наследник BaseFilter: обычный объект с методом `__call__` aiogram не
+    распознаёт как асинхронный фильтр — он получает корутину, не ждёт её и считает
+    проверку пройденной. Из-за этого панель какое-то время открывалась всем подряд.
 
     Флаг в базе намеренно не учитывается: он лишь отражает эти списки, и однажды
     выставленный (например, при другой настройке) не должен открывать панель навсегда.

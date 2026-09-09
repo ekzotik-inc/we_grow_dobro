@@ -99,6 +99,62 @@ def check_admin_access() -> None:
     assert "admin" in [c.command for c in STAFF_COMMANDS]
 
 
+async def check_admin_router_blocks() -> None:
+    """Через диспетчер: участник не должен попадать ни в /admin, ни в кнопки панели.
+
+    Проверяем именно так, а не вызовом фильтра: aiogram не ждёт результат фильтра,
+    объявленного обычным классом, и однажды панель из-за этого открылась всем.
+    """
+    import datetime
+
+    from aiogram import Bot, Dispatcher
+    from aiogram.fsm.storage.memory import MemoryStorage
+    from aiogram.types import CallbackQuery, Chat, Message, Update
+    from aiogram.types import User as TgUser
+
+    from app.bot.handlers import setup_routers
+
+    bot = Bot("123:test-token")
+    dp = Dispatcher(storage=MemoryStorage())
+    root = setup_routers()
+    dp.include_router(root)
+
+    seen: list[str] = []
+    for r in root.sub_routers:
+        for obs in (r.message, r.callback_query):
+            for h in obs.handlers:
+                def wrap(name=f"{r.name}.{h.callback.__name__}"):
+                    async def inner(*a, **k):
+                        seen.append(name)
+                    return inner
+                object.__setattr__(h, "callback", wrap())
+
+    def message_update(uid: int, text: str) -> Update:
+        return Update(update_id=1, message=Message(
+            message_id=1, date=datetime.datetime.now(), chat=Chat(id=uid, type="private"),
+            from_user=TgUser(id=uid, is_bot=False, first_name="U"), text=text))
+
+    def callback_update(uid: int, data: str) -> Update:
+        return Update(update_id=2, callback_query=CallbackQuery(
+            id="1", from_user=TgUser(id=uid, is_bot=False, first_name="U"), chat_instance="1", data=data,
+            message=Message(message_id=1, date=datetime.datetime.now(), chat=Chat(id=uid, type="private"),
+                            from_user=TgUser(id=uid, is_bot=False, first_name="U"), text="x")))
+
+    stranger = 555
+    for update in (message_update(stranger, "/admin"), callback_update(stranger, "adm"),
+                   callback_update(stranger, "adm:users:0")):
+        seen.clear()
+        await dp.feed_update(bot, update)
+        assert not any(h.startswith("admin.") for h in seen), f"участник попал в панель: {seen}"
+
+    for staff in sorted(settings.admin_ids | settings.pc_ids):
+        seen.clear()
+        await dp.feed_update(bot, message_update(staff, "/admin"))
+        assert seen == ["admin.cmd_admin"], f"сотрудник {staff} не попал в панель: {seen}"
+    await bot.session.close()
+    print("admin router ok")
+
+
 async def check_admin_flag_reset() -> None:
     """Флаг админа, оставшийся в базе от прежних настроек, снимается при следующем входе."""
     async with SessionLocal() as s:
@@ -435,6 +491,7 @@ async def main() -> None:
     check_phone_parsing()
     check_admin_access()
     await check_admin_flag_reset()
+    await check_admin_router_blocks()
 
     # Служебный HTTP: хостинг проверяет живость этим адресом, интерфейса больше нет.
     client = TestClient(app)
