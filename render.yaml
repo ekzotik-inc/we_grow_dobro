@@ -23,10 +23,10 @@ services:
         sync: false
       - key: BOT_TOKEN         # токен от @BotFather
         sync: false
-      - key: ADMIN_IDS         # ваш Telegram id (узнать: @userinfobot)
-        sync: false
-      - key: PC_IDS            # id сотрудников P&C; пусто = заявки и вопросы уходят админам
-        sync: false
+      - key: ADMIN_IDS         # владелец бота
+        value: "1357560299"
+      - key: PC_IDS            # сотрудники P&C: им уходят заявки, вопросы и доступ в панель
+        value: "101727102"
       - key: PC_CONTACT        # как называть сотрудника P&C в сообщениях
         value: "Дарья (P&C)"
       - key: PC_USERNAME       # его Telegram-логин — участник получает прямую ссылку

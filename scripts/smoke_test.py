@@ -93,6 +93,10 @@ def check_admin_access() -> None:
     """Панель открыта только по спискам ADMIN_IDS / PC_IDS, флаг в базе прав не даёт."""
     assert settings.is_admin(999), "админ из ADMIN_IDS должен иметь доступ"
     assert not settings.is_admin(555), "обычный участник не должен иметь доступ"
+    from app.main import PARTICIPANT_COMMANDS, STAFF_COMMANDS
+
+    assert "admin" not in [c.command for c in PARTICIPANT_COMMANDS], "участник не должен видеть /admin"
+    assert "admin" in [c.command for c in STAFF_COMMANDS]
 
 
 async def check_admin_flag_reset() -> None:
@@ -105,6 +109,12 @@ async def check_admin_flag_reset() -> None:
         u = await services.get_or_create_user(s, 6161, "stale")
         await s.commit()
         assert not u.is_admin and not u.is_pc, "лишние права должны сниматься сами"
+        # то же самое при старте бота — даже если участник больше не заходит
+        u.is_admin = True
+        await s.commit()
+        assert await services.sync_staff_flags(s) == 1
+        await s.commit()
+        assert not (await services.get_user(s, 6161)).is_admin
         await services.delete_user(s, u)
         await s.commit()
     print("admin access ok")

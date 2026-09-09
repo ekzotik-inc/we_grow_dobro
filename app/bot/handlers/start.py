@@ -274,6 +274,20 @@ async def _resume_registration(message: Message, state: FSMContext) -> bool:
     return True
 
 
+@fallback_router.callback_query(F.data.startswith("adm:") | (F.data == "adm"))
+async def stray_admin_click(cq: CallbackQuery, state: FSMContext) -> None:
+    """Старые сообщения с кнопкой панели остаются в чатах участников.
+
+    Фильтр админ-роутера такие нажатия просто не пропускает, и кнопка выглядит сломанной,
+    поэтому отвечаем вежливым отказом и возвращаем человека в его меню.
+    """
+    await answer_cq(cq, "Раздел доступен только сотрудникам P&C.", alert=True)
+    async with session() as s:
+        user = await load_user(s, cq.from_user)
+        text, markup = (await render_menu(s, user)) if user.status != UserStatus.new else (texts.welcome(user), kb.start_kb())
+    await edit(cq, text, markup)
+
+
 @fallback_router.message(F.contact)
 async def stray_contact(message: Message, state: FSMContext) -> None:
     """Номер прислали, а бот его не ждал — не молчим, а продолжаем анкету."""

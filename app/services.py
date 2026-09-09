@@ -93,6 +93,24 @@ async def get_or_create_user(s, tg_id: int, username: str | None) -> User:
     return user
 
 
+async def sync_staff_flags(s) -> int:
+    """Привести права в базе в соответствие с ADMIN_IDS и PC_IDS.
+
+    Выполняется при старте: участник, которому права достались от прежних настроек, теряет их,
+    даже если больше никогда не откроет бота.
+    """
+    changed = 0
+    for user in (await s.execute(select(User))).scalars():
+        want_admin = settings.is_admin(user.tg_id)
+        want_pc = settings.is_pc(user.tg_id)
+        if user.is_admin != want_admin or user.is_pc != want_pc:
+            user.is_admin, user.is_pc = want_admin, want_pc
+            changed += 1
+    if changed:
+        await s.flush()
+    return changed
+
+
 async def get_user(s, tg_id: int) -> User | None:
     return (
         await s.execute(select(User).options(selectinload(User.team)).where(User.tg_id == tg_id))

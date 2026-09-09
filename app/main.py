@@ -11,7 +11,12 @@ from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
 from aiogram.exceptions import TelegramUnauthorizedError
 from aiogram.fsm.storage.memory import MemoryStorage
-from aiogram.types import BotCommand, MenuButtonCommands
+from aiogram.types import (
+    BotCommand,
+    BotCommandScopeAllPrivateChats,
+    BotCommandScopeChat,
+    MenuButtonCommands,
+)
 
 from . import services
 from .bot.handlers import setup_routers
@@ -30,15 +35,27 @@ log = logging.getLogger("main")
 EXIT_CONFIG_ERROR = 78
 
 
+PARTICIPANT_COMMANDS = [
+    BotCommand(command="start", description="Главное меню"),
+    BotCommand(command="menu", description="Главное меню"),
+    BotCommand(command="rules", description="Правила марафона"),
+]
+STAFF_COMMANDS = PARTICIPANT_COMMANDS + [BotCommand(command="admin", description="Панель P&C")]
+
+
 async def setup_bot_ui(bot: Bot) -> None:
-    await bot.set_my_commands(
-        [
-            BotCommand(command="start", description="Главное меню"),
-            BotCommand(command="menu", description="Главное меню"),
-            BotCommand(command="rules", description="Правила марафона"),
-            BotCommand(command="admin", description="Панель P&C (только для P&C)"),
-        ]
-    )
+    """Команда /admin видна только админам и P&C.
+
+    Список команд задаётся отдельно для каждого чата: по умолчанию — без /admin,
+    и персонально с ней для тех, кто указан в ADMIN_IDS и PC_IDS. Иначе участники
+    видят «Панель P&C» в меню команд Telegram, даже если войти в неё не могут.
+    """
+    await bot.set_my_commands(PARTICIPANT_COMMANDS, scope=BotCommandScopeAllPrivateChats())
+    for staff_id in sorted(settings.admin_ids | settings.pc_ids):
+        try:
+            await bot.set_my_commands(STAFF_COMMANDS, scope=BotCommandScopeChat(chat_id=staff_id))
+        except Exception as ex:  # noqa: BLE001
+            log.warning("не удалось выдать /admin пользователю %s: %s", staff_id, ex)
     # Кнопка меню возвращается к обычным командам: мини-приложения у бота больше нет.
     await bot.set_chat_menu_button(menu_button=MenuButtonCommands())
 
@@ -50,6 +67,10 @@ async def run() -> None:
     await init_db()
     async with SessionLocal() as s:
         open_weeks = await services.load_open_weeks(s)
+        demoted = await services.sync_staff_flags(s)
+        await s.commit()
+    if demoted:
+        log.info("права приведены к спискам ADMIN_IDS/PC_IDS: изменено пользователей — %s", demoted)
     log.info("открытые недели: %s", open_weeks or "ни одной — участники видят «задания скоро»")
 
     bot = Bot(settings.bot_token, default=DefaultBotProperties(parse_mode=ParseMode.HTML))

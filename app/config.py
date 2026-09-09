@@ -86,9 +86,11 @@ class Week:
 @dataclass
 class Settings:
     bot_token: str = os.getenv("BOT_TOKEN", "")
-    admin_ids: set[int] = field(default_factory=lambda: _parse_ids(os.getenv("ADMIN_IDS", "")))
+    # Владелец бота и сотрудники P&C. Значения по умолчанию — боевые id проекта: даже если
+    # переменные окружения потеряются, панель не откроется всем подряд.
+    admin_ids: set[int] = field(default_factory=lambda: _parse_ids(os.getenv("ADMIN_IDS", "1357560299")))
     # P&C staff. Participants' questions and team requests go only here, never to the owner.
-    pc_ids: set[int] = field(default_factory=lambda: _parse_ids(os.getenv("PC_IDS", "")))
+    pc_ids: set[int] = field(default_factory=lambda: _parse_ids(os.getenv("PC_IDS", "101727102")))
     database_url: str = _normalize_db_url(os.getenv("DATABASE_URL", "")) or "sqlite+aiosqlite:///./data/marathon.db"
     # Channels for moderation. Optional here: both can be bound at runtime from /admin.
     reg_channel_id: str = os.getenv("REG_CHANNEL_ID", "").strip()
