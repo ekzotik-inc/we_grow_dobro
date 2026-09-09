@@ -1,4 +1,4 @@
-aiogram>=3.13,<4
+aiogram>=3.31,<4          # 3.31 — минимум для иконок и цветов кнопок (Bot API 9.4)
 fastapi>=0.115
 uvicorn[standard]>=0.30
 sqlalchemy[asyncio]>=2.0
