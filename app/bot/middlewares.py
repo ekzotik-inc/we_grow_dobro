@@ -6,6 +6,8 @@ custom emoji from the request, retries it once, and switches the whole bot to pl
 """
 from __future__ import annotations
 
+import asyncio
+import contextlib
 import logging
 
 from aiogram.exceptions import TelegramBadRequest
@@ -79,3 +81,58 @@ async def premium_emoji_guard(make_request, bot, method):
         emoji.disable(f"Telegram отклонил премиум-эмодзи: {message}")
         _strip_custom_emoji(method)
         return await make_request(bot, method)
+
+
+# ---------- устойчивость к засыпающей базе ----------
+
+_DB_ERRORS = ("InterfaceError", "OperationalError", "ConnectionDoesNotExistError",
+              "CannotConnectNowError", "TimeoutError", "ConnectionResetError")
+
+
+def _is_db_hiccup(ex: Exception) -> bool:
+    """Похоже ли это на «база не ответила» — то, что лечится повтором."""
+    names = {type(ex).__name__}
+    cause = ex.__cause__
+    while cause is not None:
+        names.add(type(cause).__name__)
+        cause = cause.__cause__
+    return bool(names & set(_DB_ERRORS))
+
+
+def _chat_id(event) -> int | None:
+    message = getattr(event, "message", None) or getattr(event, "edited_message", None)
+    if message is not None:
+        return message.chat.id
+    cq = getattr(event, "callback_query", None)
+    if cq is not None and cq.message is not None:
+        return cq.message.chat.id
+    return None
+
+
+async def db_retry(handler, event, data):
+    """Повторить действие, если база на бесплатном тарифе спала и не ответила с первого раза.
+
+    Без этого первое сообщение после паузы терялось молча: участник отправлял номер,
+    запрос падал, а он видел тишину и думал, что бот сломан.
+    """
+    try:
+        return await handler(event, data)
+    except Exception as ex:  # noqa: BLE001
+        if not _is_db_hiccup(ex):
+            raise
+        log.warning("База не ответила (%s), повторяю через 2 с", type(ex).__name__)
+        await asyncio.sleep(2)
+        try:
+            return await handler(event, data)
+        except Exception as ex2:  # noqa: BLE001
+            log.error("Повтор не помог: %s", ex2)
+            chat_id = _chat_id(event)
+            bot = data.get("bot")
+            if chat_id and bot:
+                with contextlib.suppress(Exception):
+                    await bot.send_message(
+                        chat_id,
+                        "⏳ База данных просыпается — не успел обработать. "
+                        "Повтори последнее действие, пожалуйста.",
+                    )
+            return None

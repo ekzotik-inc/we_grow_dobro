@@ -8,7 +8,7 @@ from aiogram import Bot
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
 from apscheduler.triggers.interval import IntervalTrigger
-from sqlalchemy import select
+from sqlalchemy import select, text
 
 from . import services, texts
 from .bot.handlers.admin import broadcast
@@ -111,8 +111,17 @@ async def admin_digest_job(bot: Bot) -> None:
 
 
 async def keepalive_job(bot: Bot) -> None:
-    """Free hosting sleeps a web service after 15 minutes without inbound traffic, which stops the bot.
-    Requesting our own health endpoint over the public URL counts as inbound traffic and keeps it awake."""
+    """Не давать уснуть ни сервису, ни базе.
+
+    Бесплатный хостинг усыпляет веб-сервис после 15 минут без входящих запросов, а Neon
+    усыпляет базу уже через пять минут простоя. Разбудить базу первым же действием участника —
+    значит заставить его ждать и, в худшем случае, получить ошибку вместо ответа.
+    """
+    async with SessionLocal() as s:
+        try:
+            await s.execute(text("SELECT 1"))
+        except Exception as ex:  # noqa: BLE001
+            log.warning("keepalive: база не ответила: %s", ex)
     if not settings.external_url:
         return
     url = f"{settings.external_url}/api/health"
@@ -132,7 +141,8 @@ def build_scheduler(bot: Bot) -> AsyncIOScheduler:
     sch.add_job(admin_digest_job, CronTrigger(hour=18, minute=0), args=[bot], id="digest")
     sch.add_job(motivation_job, CronTrigger(hour=settings.motivation_hour, minute=0), args=[bot], id="motivation")
     sch.add_job(top_digest_job, CronTrigger(hour=settings.top_hour, minute=0), args=[bot], id="top")
-    if settings.external_url:
-        sch.add_job(keepalive_job, IntervalTrigger(minutes=10), args=[bot], id="keepalive")
-        log.info("keepalive enabled: pinging %s/api/health every 10 minutes", settings.external_url)
+    # Каждые 4 минуты: Neon засыпает после пяти минут простоя.
+    sch.add_job(keepalive_job, IntervalTrigger(minutes=4), args=[bot], id="keepalive")
+    log.info("keepalive включён: база каждые 4 минуты%s",
+             f", сервис — {settings.external_url}/api/health" if settings.external_url else "")
     return sch

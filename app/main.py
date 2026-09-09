@@ -15,7 +15,7 @@ from aiogram.types import BotCommand, MenuButtonCommands
 
 from . import services
 from .bot.handlers import setup_routers
-from .bot.middlewares import premium_emoji_guard
+from .bot.middlewares import db_retry, premium_emoji_guard
 from .config import settings
 from .db import SessionLocal, init_db
 from .scheduler import build_scheduler
@@ -55,6 +55,8 @@ async def run() -> None:
     bot = Bot(settings.bot_token, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
     bot.session.middleware(premium_emoji_guard)
     dp = Dispatcher(storage=MemoryStorage())
+    # База на бесплатном тарифе засыпает: первое действие после паузы повторяем, а не теряем.
+    dp.update.outer_middleware(db_retry)
     dp.include_router(setup_routers())
     scheduler = None
     try:

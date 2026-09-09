@@ -31,6 +31,8 @@ services:
         value: "Дарья (P&C)"
       - key: PC_USERNAME       # его Telegram-логин — участник получает прямую ссылку
         value: "DaryaPMI"
+      - key: PHONE_COUNTRY_CODE  # код страны для номеров, набранных без него
+        value: "998"
       - key: TZ
         value: Asia/Almaty
       - key: PREMIUM_EMOJI   # 1 = премиум-эмодзи; нужен Telegram Premium у владельца бота

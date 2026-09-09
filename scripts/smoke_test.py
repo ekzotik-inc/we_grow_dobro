@@ -77,6 +77,18 @@ async def fill_steps(s, sub) -> None:
             await services.add_file(s, sub, {"type": "photo", "file_id": f"f{sub.id}-{i}", "name": None}, step=i)
 
 
+def check_phone_parsing() -> None:
+    """Номер должен приниматься и с кодом страны, и без него, а имя — не приниматься как номер."""
+    from app.bot.handlers.start import _clean_phone, _looks_like_phone
+
+    assert _clean_phone("+998 90 123 45 67") == "+998901234567"
+    assert _clean_phone("90 123 45 67") == "+998901234567", "местный номер дополняем кодом страны"
+    assert _clean_phone("901234567") == "+998901234567"
+    assert _clean_phone("Иван Петров") is None
+    assert _looks_like_phone("+998 90 123 45 67") and not _looks_like_phone("Иван Петров")
+    print("phone parsing ok")
+
+
 def check_admin_access() -> None:
     """Панель открыта только по спискам ADMIN_IDS / PC_IDS, флаг в базе прав не даёт."""
     assert settings.is_admin(999), "админ из ADMIN_IDS должен иметь доступ"
@@ -410,6 +422,7 @@ async def main() -> None:
     await check_week_switch()
     await check_registration_resume()
     await check_user_delete()
+    check_phone_parsing()
     check_admin_access()
     await check_admin_flag_reset()
 

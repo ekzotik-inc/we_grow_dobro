@@ -165,12 +165,16 @@ def _looks_like_phone(raw: str) -> bool:
     """Строка из цифр, плюса, скобок и дефисов — это номер, а не имя."""
     digits = [c for c in raw if c.isdigit()]
     extra = [c for c in raw if not c.isdigit() and c not in "+-() "]
-    return len(digits) >= 10 and not extra
+    return len(digits) >= 9 and not extra
 
 
 def _clean_phone(raw: str) -> str | None:
+    """Привести номер к виду +998901234567. Местный номер без кода страны дополняем сами."""
     kept = "".join(c for c in raw if c.isdigit() or c == "+")
     digits = kept.replace("+", "")
+    code = settings.phone_country_code
+    if code and not kept.startswith("+") and len(digits) == 9:
+        digits = code + digits
     if not 10 <= len(digits) <= 15:
         return None
     return f"+{digits}"
@@ -236,7 +240,7 @@ async def reg_phone_text(message: Message, state: FSMContext) -> None:
         data = await state.get_data()
         await edit_anchor(message.bot, message.chat.id, state,
                           texts.registration_step("phone", data.get("draft", {}))
-                          + "\n\n⚠️ Не похоже на номер. Пример: +7 700 123 45 67",
+                          + "\n\n⚠️ Не похоже на номер. Пример: +998 90 123 45 67",
                           kb.reg_kb("phone"))
         return
     await _phone_accepted(message, state, phone)
