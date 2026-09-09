@@ -110,6 +110,8 @@ class Settings:
     team_size: int = int(os.getenv("TEAM_SIZE", "5"))
     marathon_title: str = os.getenv("MARATHON_TITLE", "Марафон добрых дел «We Grow Dobro»")
     pc_contact: str = os.getenv("PC_CONTACT", "сотрудник P&C")
+    # Telegram-логин сотрудника P&C: участник получает прямую ссылку, чтобы не искать контакт.
+    pc_username: str = os.getenv("PC_USERNAME", "").strip().lstrip("@")
     announce_hour: int = int(os.getenv("ANNOUNCE_HOUR", "10"))
     reminder_hour: int = int(os.getenv("REMINDER_HOUR", "12"))
     motivation_hour: int = int(os.getenv("MOTIVATION_HOUR", "11"))   # nudge every other day

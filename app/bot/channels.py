@@ -53,10 +53,16 @@ async def send_files(bot: Bot, chat_id: int, files: list[dict]) -> list[int]:
     return ids
 
 
-async def notify_pc(bot: Bot, s, text: str, kb=None) -> int:
-    """Participants' questions reach P&C staff only — never the owner."""
+async def notify_pc(bot: Bot, s, text: str, kb=None, exclude: int | None = None) -> int:
+    """Participants' questions reach P&C staff only — never the owner.
+
+    `exclude` keeps a staff card out of the requester's own chat: an admin who asks for a team
+    would otherwise get the internal instructions meant for the person handling the request.
+    """
     n = 0
     for pc_id in await services.list_pc_tg_ids(s):
+        if pc_id == exclude:
+            continue
         try:
             await bot.send_message(pc_id, text, reply_markup=kb)
             n += 1

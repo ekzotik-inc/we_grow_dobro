@@ -9,7 +9,6 @@ from aiogram.types import CallbackQuery, Message
 
 from ... import keyboards as kb
 from ... import services, texts
-from ...config import settings
 from ...models import UserStatus
 from .. import channels
 from ..common import ANCHOR_KEY, answer_cq, delete_quietly, edit, edit_anchor, load_user, session
@@ -81,12 +80,7 @@ async def cb_team_card(cq: CallbackQuery) -> None:
 @router.callback_query(F.data == "help")
 async def cb_help(cq: CallbackQuery, state: FSMContext) -> None:
     await state.clear()
-    await edit(
-        cq,
-        f"🆘 <b>Помощь P&C</b>\n\nЕсли не получается выбрать команду или есть вопрос по марафону — выбери пункт ниже, "
-        f"и {texts.e(settings.pc_contact)} свяжется с тобой.",
-        kb.help_kb(),
-    )
+    await edit(cq, texts.help_screen(), kb.help_kb())
     await answer_cq(cq)
 
 
@@ -98,15 +92,16 @@ async def cb_help_team(cq: CallbackQuery) -> None:
             await answer_cq(cq, "Сначала зарегистрируйся", alert=True)
             return
         uname = f" (@{user.username})" if user.username else ""
-        await channels.notify_pc(
+        sent = await channels.notify_pc(
             cq.bot,
             s,
             f"🆘 <b>Запрос на распределение в команду</b>\n\n{texts.e(user.display_name)}{texts.e(uname)}"
             + (f" · {texts.e(user.department)}" if user.department else "")
             + f"\nТекущая команда: {texts.e(user.team.name) if user.team else '—'}\n\n"
             f"Распределить: /admin → Участники → {texts.e(user.display_name)} → «Перевести в команду».",
+            exclude=cq.from_user.id,
         )
-    await edit(cq, "✅ Запрос отправлен сотруднику P&C. Тебя распределят в команду и уведомят в этом чате.", kb.back_kb())
+    await edit(cq, texts.help_team_sent(sent), kb.back_kb())
     await answer_cq(cq)
 
 

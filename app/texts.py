@@ -66,6 +66,14 @@ def e(text: str | None) -> str:
     return escape(text or "")
 
 
+def pc_link() -> str:
+    """Имя сотрудника P&C — ссылкой, если известен его Telegram-логин."""
+    name = e(settings.pc_contact)
+    if settings.pc_username:
+        return f'<a href="https://t.me/{e(settings.pc_username)}">{name}</a>'
+    return name
+
+
 RULES = f"""📜 <b>Правила марафона</b>
 
 {voice("Садись поудобнее — расскажу, как всё устроено. Это недолго, зато потом никаких сюрпризов.")}
@@ -240,7 +248,7 @@ def teams_list(teams: list[dict], user: User) -> str:
         lines.append(voice("Открой команду, чтобы посмотреть состав и вклад каждого.\nСвою найдёшь по пометке."))
     else:
         lines.append(voice(
-            f"Команду назначает {e(settings.pc_contact)} — как только назначит, откроются задания.\n"
+            f"Команду назначает {pc_link()} — как только назначит, откроются задания.\n"
             "Хочешь к конкретным коллегам? Нажми «Помощь» и напиши, я передам."
         ))
     return "\n".join(lines)
@@ -594,7 +602,7 @@ def pending_status(user: User) -> str:
             f"{e(user.display_name)}"
             + (f" · {e(user.department)}" if user.department else "")
             + "\n\n"
-            + voice(f"Заявку посмотрит {e(settings.pc_contact)} и подтвердит участие. "
+            + voice(f"Заявку посмотрит {pc_link()} и подтвердит участие. "
                     "Как только это случится — напишу сюда, и откроется меню с заданиями.")
         )
     return (
@@ -627,6 +635,29 @@ def db_expiry_warning() -> str | None:
         f"🔴 <b>Внимание: база данных будет удалена {when_txt}.</b>\n"
         "Выгрузите итоги марафона, пока данные на месте: /admin → 📥 Экспорт Excel."
     )
+
+
+def help_screen() -> str:
+    return (
+        "💬 <b>Помощь</b>\n"
+        f"<i>на связи {pc_link()}</i>\n\n"
+        "Не получается выбрать команду или есть вопрос по марафону — выбери пункт ниже, "
+        "я передам сотруднику P&C и вернусь с ответом сюда.\n\n"
+        + voice("Ответы на большинство вопросов есть в «Правилах» — там же сроки и условия зачёта.\n"
+                f"Если вопрос срочный, напиши напрямую: {pc_link()}.")
+    )
+
+
+def help_team_sent(delivered: int) -> str:
+    """Что видит участник после запроса на распределение в команду."""
+    lines = ["✅ <b>Запрос отправлен</b>", "", f"Команду подберёт {pc_link()} — как назначит, я напишу сюда."]
+    if not delivered:
+        lines.append("")
+        lines.append("<i>Пока некому передать запрос автоматически — напиши напрямую, пожалуйста.</i>")
+    lines.append("")
+    lines.append(voice("Пока ждёшь — загляни в «Правила» и «Задания недели», чтобы выбрать первое дело.\n"
+                       f"Есть вопрос прямо сейчас? Напиши {pc_link()}."))
+    return "\n".join(lines)
 
 
 def submission_sent(task: Task) -> str:

@@ -27,6 +27,10 @@ services:
         sync: false
       - key: PC_IDS            # id сотрудников P&C; пусто = заявки и вопросы уходят админам
         sync: false
+      - key: PC_CONTACT        # как называть сотрудника P&C в сообщениях
+        value: "Дарья (P&C)"
+      - key: PC_USERNAME       # его Telegram-логин — участник получает прямую ссылку
+        value: "DaryaPMI"
       - key: TZ
         value: Asia/Almaty
       - key: PREMIUM_EMOJI   # 1 = премиум-эмодзи; нужен Telegram Premium у владельца бота
