@@ -429,36 +429,59 @@ def _steps_progress(steps: list[dict], done: list[bool], current: int | None = N
 
 
 def submission_step(sub: Submission, index: int, warning: str = "") -> str:
-    """Экран одного шага: что именно приложить и как это сделать."""
+    """Отдельное сообщение под один шаг: что сделать, что должно быть видно, что не подойдёт."""
     from . import services
 
     steps = services.submission_steps(sub)
     done = [services.step_done(sub, i) for i in range(len(steps))]
     st = steps[index]
-    icon, action, what = KIND_WORD.get(st.get("kind", "photo"), KIND_WORD["photo"])
+    icon, action, _what = KIND_WORD.get(st.get("kind", "photo"), KIND_WORD["photo"])
+    left = [i for i in range(len(steps)) if not done[i] and i != index]
 
-    lines = [f"<b>Шаг {index + 1} из {len(steps)}</b>", f"{icon} <b>{e(st['title'])}</b>"]
-    if sub.option:
-        lines.append(f"<i>{e(sub.task.title)} · {e(sub.option.title)}</i>")
-    else:
-        lines.append(f"<i>{e(sub.task.title)}</i>")
+    lines = [f"{icon} <b>Шаг {index + 1} из {len(steps)} · {e(st['title'])}</b>"]
+    lines.append(f"<i>{e(sub.task.title)}" + (f" · {e(sub.option.title)}" if sub.option else "") + "</i>")
     lines.append("")
     lines.append(e(st.get("need", "")))
+
+    if st.get("visible"):
+        lines.append("")
+        lines.append(f"{rule('Что должно быть видно')}\n{e(st['visible'])}")
+    if st.get("avoid"):
+        lines.append("")
+        lines.append(f"{rule('Что не подойдёт')}\n{e(st['avoid'])}")
+
     lines.append("")
-    lines.append(f"{action} прямо в этот чат — я подхвачу и открою следующий шаг.")
+    lines.append(f"<b>{action} следующим сообщением</b> — я приму и открою следующий шаг.")
+
     if warning:
         lines.append("")
         lines.append(f"❗ {e(warning)}")
+
     lines.append("")
-    lines.extend(_steps_progress(steps, done, index))
-    lines.append("")
-    help_text = st.get("help", "")
-    left = len([i for i in range(len(steps)) if not done[i] and i != index])
-    tail = ("Это последний шаг — дальше покажу всё вместе и отправим на проверку."
-            if left == 0 else f"После этого останется ещё {left} "
-            f"{plural(left, 'шаг', 'шага', 'шагов')}. Идём по одному, спешить некуда.")
-    lines.append(voice((help_text + "\n" if help_text else "") + tail))
+    talk = st.get("help", "")
+    if left:
+        tail = f"После этого останется ещё {len(left)} {plural(len(left), 'шаг', 'шага', 'шагов')} — идём по одному."
+    else:
+        tail = "Это последний шаг: дальше покажу всё вместе, и отправим на проверку."
+    if index == 0:
+        tail = "Каждый шаг присылай отдельным сообщением — так ничего не потеряется. " + tail
+    lines.append(voice((talk + "\n" if talk else "") + tail))
     return "\n".join(lines)
+
+
+def step_accepted(sub: Submission, index: int) -> str:
+    """Короткая отметка вместо подробностей: шаг закрыт, сообщение остаётся в переписке."""
+    from . import services
+
+    steps = services.submission_steps(sub)
+    st = steps[index]
+    if st.get("kind") == "note":
+        body = e((sub.answers or {}).get(str(index), ""))[:200]
+        detail = f"<i>{body}</i>" if body else ""
+    else:
+        n = len([f for f in (sub.files or []) if f.get("step") == index])
+        detail = f"<i>приложено: {n}</i>"
+    return f"✅ <b>Шаг {index + 1} из {len(steps)} принят · {e(st['title'])}</b>\n{detail}"
 
 
 def submission_review(sub: Submission) -> str:

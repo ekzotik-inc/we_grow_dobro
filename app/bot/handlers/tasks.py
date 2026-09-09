@@ -1,6 +1,7 @@
 """Tasks of the week, task card, submission flow (photos + note), my results."""
 from __future__ import annotations
 
+import contextlib
 import logging
 
 from aiogram import F, Router
@@ -12,7 +13,7 @@ from ... import services, texts
 from ...models import SubmissionStatus, UserStatus
 from .. import channels
 from ..channels import send_files
-from ..common import ANCHOR_KEY, answer_cq, delete_quietly, edit, edit_anchor, load_user, session
+from ..common import ANCHOR_KEY, answer_cq, delete_quietly, edit, load_user, session
 from ..states import SubmissionFlow
 
 log = logging.getLogger(__name__)
@@ -102,16 +103,47 @@ def _screen(sub, index: int | None = None, warning: str = ""):
     )
 
 
+async def _close_step_message(bot, chat_id: int, state: FSMContext, sub, index: int) -> None:
+    """Свернуть сообщение пройденного шага в короткую отметку — оно остаётся в переписке."""
+    data = await state.get_data()
+    mid = (data.get("step_msgs") or {}).get(str(index))
+    if not mid:
+        return
+    with contextlib.suppress(Exception):
+        await bot.edit_message_text(texts.step_accepted(sub, index), chat_id=chat_id, message_id=mid)
+
+
 async def _open_editor(cq_or_msg, state: FSMContext, sub, index: int | None = None, warning: str = "") -> None:
+    """Показать нужный экран мастера.
+
+    Каждый шаг — отдельное сообщение: так участник видит всю инструкцию по порядку и может
+    вернуться к любому шагу в переписке. Повторный показ того же шага сообщение не плодит —
+    оно редактируется на месте.
+    """
+    steps = services.submission_steps(sub)
+    if index is None:
+        # Определяем шаг сразу: иначе сообщение запишется не под своим ключом и не свернётся.
+        index = services.first_unfinished_step(sub) if steps else None
     await state.set_state(SubmissionFlow.collecting)
     await state.update_data(sub_id=sub.id, step=index)
     text, markup = _screen(sub, index, warning)
-    if isinstance(cq_or_msg, CallbackQuery):
-        m = await edit(cq_or_msg, text, markup)
-        if m:
-            await state.update_data({ANCHOR_KEY: m.message_id})
-    else:
-        await edit_anchor(cq_or_msg.bot, cq_or_msg.chat.id, state, text, markup)
+    msg = cq_or_msg.message if isinstance(cq_or_msg, CallbackQuery) else cq_or_msg
+    bot, chat_id = msg.bot, msg.chat.id
+
+    data = await state.get_data()
+    step_msgs = dict(data.get("step_msgs") or {})
+    key = str(index) if steps and index is not None and index < len(steps) else "review"
+
+    known = step_msgs.get(key)
+    if known:
+        with contextlib.suppress(Exception):
+            await bot.edit_message_text(text, chat_id=chat_id, message_id=known, reply_markup=markup)
+            await state.update_data({ANCHOR_KEY: known})
+            return
+    sent = await bot.send_message(chat_id, text, reply_markup=markup)
+    step_msgs[key] = sent.message_id
+    await state.update_data(step_msgs=step_msgs)
+    await state.update_data({ANCHOR_KEY: sent.message_id})
 
 
 @router.callback_query(F.data.regexp(r"^sub:start:(\d+):(\d+)$"))
@@ -129,6 +161,7 @@ async def cb_sub_start(cq: CallbackQuery, state: FSMContext) -> None:
         except services.ServiceError as ex:
             await answer_cq(cq, str(ex), alert=True)
             return
+    await state.update_data(step_msgs={})
     await _open_editor(cq, state, sub)
     await answer_cq(cq)
 
@@ -199,8 +232,10 @@ async def sub_file(message: Message, state: FSMContext) -> None:
             return
         sub = await services.get_submission(s, sub.id)
         next_index = services.first_unfinished_step(sub) if steps else None
-    # Чат остаётся чистым: присланное убираем, экран мастера показывает следующий шаг.
+    # Присланное убираем, пройденный шаг сворачиваем в отметку, следующий приходит новым сообщением.
     await delete_quietly(message)
+    if steps and next_index != index:
+        await _close_step_message(message.bot, message.chat.id, state, sub, index)
     await _open_editor(message, state, sub, next_index, warning)
 
 
@@ -233,6 +268,8 @@ async def sub_note(message: Message, state: FSMContext) -> None:
         sub = await services.get_submission(s, sub.id)
         next_index = services.first_unfinished_step(sub) if steps else None
     await delete_quietly(message)
+    if steps and next_index != index:
+        await _close_step_message(message.bot, message.chat.id, state, sub, index)
     await _open_editor(message, state, sub, next_index)
 
 
