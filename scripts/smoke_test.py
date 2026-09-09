@@ -46,10 +46,32 @@ async def reset_schema() -> None:
         await conn.run_sync(Base.metadata.drop_all)
 
 
+async def check_auto_migration() -> None:
+    """A release that adds a field must upgrade a database made by the previous release.
+
+    Without it the bot crashes at startup with UndefinedColumn — which is exactly what happened
+    on the first deploy after the sign-up fields were added.
+    """
+    from app.db import engine, _add_missing_columns
+    from sqlalchemy import inspect, text
+
+    async with engine.begin() as conn:
+        await conn.execute(text("ALTER TABLE users DROP COLUMN phone"))
+        await conn.execute(text("ALTER TABLE users DROP COLUMN is_pc"))
+        await conn.run_sync(_add_missing_columns)
+        cols = await conn.run_sync(lambda c: {x["name"] for x in inspect(c).get_columns("users")})
+    assert {"phone", "is_pc"} <= cols, cols
+    async with SessionLocal() as s:
+        await services.get_or_create_user(s, 424242, "migrated")
+        await s.commit()
+    print("auto-migration ok")
+
+
 async def main() -> None:
     print("backend:", settings.database_url.split("://")[0])
     await reset_schema()
     await init_db()
+    await check_auto_migration()
     async with SessionLocal() as s:
         tasks = await services.list_tasks(s)
         assert len(tasks) == 12, len(tasks)

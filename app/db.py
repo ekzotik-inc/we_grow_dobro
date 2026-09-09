@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 from pathlib import Path
 
-from sqlalchemy import select
+from sqlalchemy import inspect, select, text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from .config import settings
@@ -33,6 +34,8 @@ def _engine_kwargs() -> dict:
 engine = create_async_engine(settings.database_url, echo=False, **_engine_kwargs())
 SessionLocal = async_sessionmaker(engine, expire_on_commit=False, class_=AsyncSession)
 
+log = logging.getLogger(__name__)
+
 DATA_DIR = Path(__file__).resolve().parent.parent / "data"
 
 
@@ -43,7 +46,45 @@ async def init_db() -> None:
             os.makedirs(os.path.dirname(os.path.abspath(path)), exist_ok=True)
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+        await conn.run_sync(_add_missing_columns)
     await seed_tasks()
+
+
+def _column_ddl(dialect, column) -> str | None:
+    """`ADD COLUMN` clause for a column the live table is missing, or None if it cannot be added safely."""
+    kind = column.type.compile(dialect)
+    if column.nullable:
+        return f"{column.name} {kind}"
+    default = getattr(column.default, "arg", None)
+    if column.server_default is not None or callable(default) or default is None:
+        return None
+    literal = "TRUE" if default is True else "FALSE" if default is False else repr(default)
+    return f"{column.name} {kind} NOT NULL DEFAULT {literal}"
+
+
+def _add_missing_columns(conn) -> None:
+    """Bring an existing database up to the current models.
+
+    The project has no migration tool: `create_all` builds missing tables but never touches a table
+    that already exists, so a release that adds a field would keep crashing with UndefinedColumn on
+    a database created by an earlier release. Only additive changes are applied here — nothing is
+    dropped or retyped, so running it against an up-to-date database does nothing.
+    """
+    inspector = inspect(conn)
+    live_tables = set(inspector.get_table_names())
+    for table in Base.metadata.sorted_tables:
+        if table.name not in live_tables:
+            continue
+        existing = {c["name"] for c in inspector.get_columns(table.name)}
+        for column in table.columns:
+            if column.name in existing:
+                continue
+            clause = _column_ddl(conn.dialect, column)
+            if clause is None:
+                log.warning("Столбец %s.%s не добавлен автоматически — нужна ручная миграция.", table.name, column.name)
+                continue
+            log.info("Добавляю столбец %s.%s", table.name, column.name)
+            conn.execute(text(f"ALTER TABLE {table.name} ADD COLUMN {clause}"))
 
 
 async def seed_tasks() -> None:
