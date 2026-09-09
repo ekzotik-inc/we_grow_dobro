@@ -131,7 +131,9 @@ async def reg_name(message: Message, state: FSMContext) -> None:
     await state.set_state(Registration.phone)
     await edit_anchor(message.bot, message.chat.id, state, texts.registration_step("phone", draft), kb.reg_kb("phone"))
     # A reply keyboard is the only way to offer Telegram's "share my number" button.
-    prompt = await message.answer("👇", reply_markup=kb.phone_request_kb())
+    prompt = await message.answer("👇 Кнопка «Поделиться номером» — для телефона. "
+                                  "С компьютера просто напиши номер сообщением.",
+                                  reply_markup=kb.phone_request_kb())
     await state.update_data(phone_prompt_id=prompt.message_id)
 
 
@@ -206,7 +208,9 @@ async def _resume_registration(message: Message, state: FSMContext) -> bool:
     m = await message.answer(texts.registration_step(step, draft), reply_markup=markup)
     await state.update_data({ANCHOR_KEY: m.message_id})
     if step == "phone":
-        prompt = await message.answer("👇", reply_markup=kb.phone_request_kb())
+        prompt = await message.answer("👇 Кнопка «Поделиться номером» — для телефона. "
+                                  "С компьютера просто напиши номер сообщением.",
+                                  reply_markup=kb.phone_request_kb())
         await state.update_data(phone_prompt_id=prompt.message_id)
     return True
 
