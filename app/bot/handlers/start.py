@@ -14,6 +14,9 @@ from ..common import ANCHOR_KEY, answer_cq, delete_quietly, edit, edit_anchor, l
 from ..states import Registration
 
 router = Router(name="start")
+# Перехватчик «сообщение никому не подошло» подключается последним (см. setup_routers),
+# иначе он забрал бы текст, который ждут другие шаги: помощь, отчёты, админ-панель.
+fallback_router = Router(name="fallback")
 
 
 async def render_menu(s, user) -> tuple[str, object]:
@@ -120,6 +123,10 @@ async def reg_name(message: Message, state: FSMContext) -> None:
                           kb.reg_kb("full_name"))
         return
     draft["full_name"] = name
+    async with session() as s:
+        user = await load_user(s, message.from_user)
+        await services.save_draft(s, user, full_name=name)
+        await s.commit()
     await state.update_data(draft=draft)
     await state.set_state(Registration.phone)
     await edit_anchor(message.bot, message.chat.id, state, texts.registration_step("phone", draft), kb.reg_kb("phone"))
@@ -140,6 +147,12 @@ async def _phone_accepted(message: Message, state: FSMContext, phone: str) -> No
     data = await state.get_data()
     draft = data.get("draft", {})
     draft["phone"] = phone
+    async with session() as s:
+        user = await load_user(s, message.from_user)
+        await services.save_draft(s, user, phone=phone)
+        await s.commit()
+        if not draft.get("full_name") and user.full_name:
+            draft["full_name"] = user.full_name
     await state.update_data(draft=draft)
     await state.set_state(Registration.team)
     # Take the reply keyboard away: the rest of the bot is inline only.
@@ -170,6 +183,57 @@ async def reg_phone_text(message: Message, state: FSMContext) -> None:
                           kb.reg_kb("phone"))
         return
     await _phone_accepted(message, state, phone)
+
+
+async def _resume_registration(message: Message, state: FSMContext) -> bool:
+    """Продолжить анкету после перезапуска бота.
+
+    Состояние диалога живёт в памяти, а сервис засыпает и перезапускается. Поэтому, если
+    сообщение пришло «в никуда», шаг восстанавливается по тому, что уже сохранено в базе.
+    """
+    async with session() as s:
+        user = await load_user(s, message.from_user)
+        if user.status != UserStatus.new:
+            return False
+        draft = services.draft_from_user(user)
+        step = services.draft_step(user)
+        rows = await services.leaderboard(s) if step == "team" else []
+
+    await state.set_state({"full_name": Registration.full_name, "phone": Registration.phone,
+                           "team": Registration.team}[step])
+    await state.update_data(draft=draft)
+    markup = kb.reg_team_kb(rows) if step == "team" else kb.reg_kb(step)
+    m = await message.answer(texts.registration_step(step, draft), reply_markup=markup)
+    await state.update_data({ANCHOR_KEY: m.message_id})
+    if step == "phone":
+        prompt = await message.answer("👇", reply_markup=kb.phone_request_kb())
+        await state.update_data(phone_prompt_id=prompt.message_id)
+    return True
+
+
+@fallback_router.message(F.contact)
+async def stray_contact(message: Message, state: FSMContext) -> None:
+    """Номер прислали, а бот его не ждал — не молчим, а продолжаем анкету."""
+    phone = message.contact.phone_number if message.contact else ""
+    await delete_quietly(message)
+    async with session() as s:
+        user = await load_user(s, message.from_user)
+        if user.status == UserStatus.new and phone:
+            await services.save_draft(s, user, phone=phone if phone.startswith("+") else f"+{phone}")
+            await s.commit()
+    if not await _resume_registration(message, state):
+        await _fallback_menu(message, state)
+
+
+async def _fallback_menu(message: Message, state: FSMContext) -> None:
+    async with session() as s:
+        user = await load_user(s, message.from_user)
+        if user.status == UserStatus.new:
+            m = await message.answer(texts.welcome(user), reply_markup=kb.start_kb())
+        else:
+            text, markup = await render_menu(s, user)
+            m = await message.answer(text, reply_markup=markup)
+    await state.update_data({ANCHOR_KEY: m.message_id})
 
 
 @router.callback_query(Registration.team, F.data.regexp(r"^reg:team:(\d+)$"))
@@ -219,3 +283,28 @@ async def reg_confirm(cq: CallbackQuery, state: FSMContext) -> None:
     else:
         await edit(cq, "🎉 <b>Регистрация завершена!</b>\n\nТеперь выбери команду — без команды отчёты отправлять нельзя.\n\n" + text, markup)
         await answer_cq(cq, "Добро пожаловать в марафон! 🌱")
+
+
+@fallback_router.message(F.text & ~F.text.startswith("/"))
+async def stray_text(message: Message, state: FSMContext) -> None:
+    """Последний обработчик: сообщение, которое не подошло никуда.
+
+    Обычно это продолжение анкеты после перезапуска сервиса. Молчать нельзя — участник
+    решит, что бот сломался, поэтому либо возвращаем его в анкету, либо показываем меню.
+    """
+    async with session() as s:
+        user = await load_user(s, message.from_user)
+        new_user = user.status == UserStatus.new
+        if new_user and services.draft_step(user) == "full_name":
+            name = " ".join((message.text or "").split())
+            if 3 <= len(name) <= 80:
+                await services.save_draft(s, user, full_name=name)
+                await s.commit()
+        elif new_user and services.draft_step(user) == "phone":
+            phone = _clean_phone(message.text or "")
+            if phone:
+                await services.save_draft(s, user, phone=phone)
+                await s.commit()
+    await delete_quietly(message)
+    if not await _resume_registration(message, state):
+        await _fallback_menu(message, state)

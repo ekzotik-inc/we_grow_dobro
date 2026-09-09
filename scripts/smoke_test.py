@@ -77,6 +77,21 @@ async def fill_steps(s, sub) -> None:
             await services.add_file(s, sub, {"type": "photo", "file_id": f"f{sub.id}-{i}", "name": None}, step=i)
 
 
+async def check_registration_resume() -> None:
+    """Анкета должна переживать перезапуск бота: шаги сохраняются в базе."""
+    async with SessionLocal() as s:
+        u = await services.get_or_create_user(s, 4242, "resume")
+        assert services.draft_step(u) == "full_name"
+        await services.save_draft(s, u, full_name="Анна Восстановленная")
+        await s.commit()
+        assert services.draft_step(u) == "phone", "после имени ждём телефон"
+        await services.save_draft(s, u, phone="+77001234567")
+        await s.commit()
+        assert services.draft_step(u) == "team"
+        assert services.draft_from_user(u) == {"full_name": "Анна Восстановленная", "phone": "+77001234567"}
+    print("registration resume ok")
+
+
 async def check_week_switch() -> None:
     """Недели открывает админ. Пока ни одна не открыта, участник не видит и не сдаёт задания."""
     async with SessionLocal() as s:
@@ -336,6 +351,7 @@ async def main() -> None:
     await engine.dispose()
 
     await check_week_switch()
+    await check_registration_resume()
 
     # Служебный HTTP: хостинг проверяет живость этим адресом, интерфейса больше нет.
     client = TestClient(app)

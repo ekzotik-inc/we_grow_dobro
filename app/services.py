@@ -99,6 +99,38 @@ async def get_user_by_id(s, user_id: int) -> User | None:
     return (await s.execute(select(User).options(selectinload(User.team)).where(User.id == user_id))).scalar_one_or_none()
 
 
+async def save_draft(s, user: User, full_name: str | None = None, phone: str | None = None) -> None:
+    """Сохранить шаг анкеты сразу в базу.
+
+    Состояние диалога живёт в памяти процесса, а хостинг усыпляет и перезапускает сервис —
+    без этого участник, приславший телефон после перезапуска, не получал никакого ответа.
+    """
+    if full_name is not None:
+        user.full_name = full_name.strip()[:160]
+    if phone is not None:
+        user.phone = phone.strip()[:32] or None
+    await s.flush()
+
+
+def draft_from_user(user: User) -> dict:
+    """Черновик анкеты, восстановленный из базы после перезапуска бота."""
+    draft = {}
+    if user.full_name:
+        draft["full_name"] = user.full_name
+    if user.phone:
+        draft["phone"] = user.phone
+    return draft
+
+
+def draft_step(user: User) -> str:
+    """На каком шаге анкеты остановился участник."""
+    if not user.full_name:
+        return "full_name"
+    if not user.phone:
+        return "phone"
+    return "team"
+
+
 async def register_user(
     s, user: User, full_name: str, department: str | None, city: str | None,
     phone: str | None = None, wanted_team_id: int | None = None,
