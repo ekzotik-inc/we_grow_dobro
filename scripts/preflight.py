@@ -54,6 +54,15 @@ async def main() -> None:
             notes.append("Ни одна неделя не открыта — участники увидят «Задания скоро откроются». "
                          "Откройте первую в /admin → «Недели и задания» в день старта.")
 
+        reg_ch = await services.get_channel_id(s, "reg_channel_id")
+        res_ch = await services.get_channel_id(s, "results_channel_id")
+        if reg_ch and res_ch:
+            print(f"  ✅ каналы подключены: заявки {reg_ch}, результаты {res_ch}")
+        else:
+            notes.append("Каналы не привязаны — карточки заявок и отчётов пойдут в личку P&C. "
+                         "Привязать: /admin → «Каналы и настройки». Чтобы привязка пережила смену базы, "
+                         "укажите REG_CHANNEL_ID и RESULTS_CHANNEL_ID в переменных окружения.")
+
         for flag, human in (("registration_open", "приём заявок"), ("submissions_open", "приём отчётов"),
                             ("moderation_required", "модерация заявок")):
             state = await services.get_flag(s, flag)
