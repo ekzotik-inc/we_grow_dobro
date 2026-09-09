@@ -1,16 +1,11 @@
-"""End-to-end check of the business logic and the Web App API without Telegram.
+"""End-to-end check of the business logic without Telegram.
 
 Run:  BOT_TOKEN=test:token FORCE_WEEK=1 DATABASE_URL=sqlite+aiosqlite:///./data/smoke.db python -m scripts.smoke_test
 """
 from __future__ import annotations
 
 import asyncio
-import hashlib
-import hmac
-import json
 import os
-import time
-from urllib.parse import urlencode
 
 os.environ.setdefault("BOT_TOKEN", "123:test-token")
 os.environ.setdefault("FORCE_WEEK", "1")
@@ -25,14 +20,6 @@ from app.db import SessionLocal, engine, init_db  # noqa: E402
 from app.export import export_xlsx  # noqa: E402
 from app.models import Base, SubmissionStatus, UserStatus  # noqa: E402
 from app.web.api import app  # noqa: E402
-
-
-def init_data_for(user: dict) -> str:
-    pairs = {"auth_date": str(int(time.time())), "query_id": "AAE", "user": json.dumps(user, separators=(",", ":"))}
-    check = "\n".join(f"{k}={v}" for k, v in sorted(pairs.items()))
-    secret = hmac.new(b"WebAppData", settings.bot_token.encode(), hashlib.sha256).digest()
-    pairs["hash"] = hmac.new(secret, check.encode(), hashlib.sha256).hexdigest()
-    return urlencode(pairs)
 
 
 async def reset_schema() -> None:
@@ -284,24 +271,14 @@ async def main() -> None:
     # opened them — release the pool so the client opens fresh ones.
     await engine.dispose()
 
-    # Web App API
+    # Служебный HTTP: хостинг проверяет живость этим адресом, интерфейса больше нет.
     client = TestClient(app)
-    assert client.get("/api/health").json()["ok"]
-    assert client.get("/api/bootstrap").status_code == 401
-    bad = init_data_for({"id": 1000}).replace("hash=", "hash=00")
-    assert client.get("/api/bootstrap", headers={"Authorization": "tma " + bad}).status_code == 401
-    r = client.get("/api/bootstrap", headers={"Authorization": "tma " + init_data_for({"id": 1000, "username": "user0", "first_name": "A"})})
-    assert r.status_code == 200, r.text
-    js = r.json()
-    assert js["me"]["team"]["name"] == "Добряки" and js["me"]["points"] == t_w1.points
-    # a week's tasks must not leave the server before that week starts
-    assert js["marathon"]["current_week"] == 1
-    assert {t["week"] for t in js["tasks"]} == {1}, {t["week"] for t in js["tasks"]}
-    assert [w["visible"] for w in js["marathon"]["weeks"]] == [True, False, False]
-    assert client.get("/").status_code == 200 and client.get("/static/app.js").status_code == 200
-    import json, pathlib
-    pathlib.Path("/tmp/boot.json").write_text(json.dumps(js, ensure_ascii=False))
-    print("web api ok:", js["me"])
+    health = client.get("/api/health").json()
+    assert health["ok"] and health["week"] == 1, health
+    assert client.get("/").status_code == 200
+    assert client.get("/api/bootstrap").status_code == 404, "мини-приложение должно быть удалено"
+    print("http ok:", health)
+
     print("\nALL SMOKE TESTS PASSED")
 
 

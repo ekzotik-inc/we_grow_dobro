@@ -55,15 +55,6 @@ def _normalize_db_url(raw: str) -> str:
     return url
 
 
-def _webapp_url() -> str:
-    """Explicit WEBAPP_URL wins; otherwise use the public URL the host assigns (Render sets it)."""
-    for value in (os.getenv("WEBAPP_URL"), os.getenv("RENDER_EXTERNAL_URL")):
-        value = (value or "").strip().rstrip("/")
-        if value:
-            return value
-    return ""
-
-
 def _parse_ids(raw: str) -> set[int]:
     out: set[int] = set()
     for part in raw.replace(";", ",").split(","):
@@ -99,7 +90,6 @@ class Settings:
     # P&C staff. Participants' questions and team requests go only here, never to the owner.
     pc_ids: set[int] = field(default_factory=lambda: _parse_ids(os.getenv("PC_IDS", "")))
     database_url: str = _normalize_db_url(os.getenv("DATABASE_URL", "")) or "sqlite+aiosqlite:///./data/marathon.db"
-    webapp_url: str = field(default_factory=_webapp_url)
     # Channels for moderation. Optional here: both can be bound at runtime from /admin.
     reg_channel_id: str = os.getenv("REG_CHANNEL_ID", "").strip()
     results_channel_id: str = os.getenv("RESULTS_CHANNEL_ID", "").strip()

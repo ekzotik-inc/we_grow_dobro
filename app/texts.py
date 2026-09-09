@@ -324,7 +324,7 @@ def week_max_points(tasks: list[Task]) -> int:
     return total
 
 
-def tasks_list(week: int, tasks: list[Task], subs: dict[int, Submission]) -> str:
+def tasks_list(week: int, tasks: list[Task], subs: dict[int, Submission], no_team: bool = False) -> str:
     cw = settings.current_week()
     is_now = bool(cw and cw.number == week)
     is_past = bool(cw and cw.number > week) or settings.marathon_status() == "after"
@@ -347,6 +347,9 @@ def tasks_list(week: int, tasks: list[Task], subs: dict[int, Submission]) -> str
     done = len([x for x in subs.values() if x.week == week and x.status in (SubmissionStatus.pending, SubmissionStatus.approved)])
     total = week_max_points(tasks)
     hint = "\nНажми на задание — расскажу условия и приму отчёт."
+    if no_team:
+        hint = ("\nОтчёты идут в командный зачёт, поэтому сначала нужна команда — её назначает "
+                f"{pc_link()}. Открой любое задание и жми «Попросить команду у P&C».")
     if not is_now:
         line = f"Неделя уже закрыта, но условия можно посмотреть.{hint}"
     elif done == 0:
@@ -363,7 +366,7 @@ def tasks_list(week: int, tasks: list[Task], subs: dict[int, Submission]) -> str
     return "\n".join(lines)
 
 
-def task_card(task: Task, sub: Submission | None, number: int | None = None) -> str:
+def task_card(task: Task, sub: Submission | None, number: int | None = None, no_team: bool = False) -> str:
     head = f"Задание {number}" if number else f"Неделя {task.week}"
     lines = [f"<b>{head}</b>", f"{e(task.emoji)} <b>{e(task.title)}</b>"]
     lines.append(f"<b>{task.points_label}</b> {plural(max(task.points, 1), 'балл', 'балла', 'баллов')} "
@@ -396,7 +399,12 @@ def task_card(task: Task, sub: Submission | None, number: int | None = None) -> 
         return "\n".join(lines)
 
     lines.append("")
-    if task.options:
+    if no_team:
+        lines.append(voice(
+            "Отчёты идут в командный зачёт, поэтому нужна команда — её назначает "
+            f"{pc_link()}.\nЖми «Попросить команду у P&C», я передам запрос прямо сейчас."
+        ))
+    elif task.options:
         lines.append(voice("Выбери вариант — покажу, что приложить, и приму отчёт."))
     else:
         lines.append(voice("Сделал? Жми «Сделать и отправить отчёт» — приложишь фото и пару строк."))

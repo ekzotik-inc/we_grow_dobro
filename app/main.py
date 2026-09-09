@@ -11,7 +11,7 @@ from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
 from aiogram.exceptions import TelegramUnauthorizedError
 from aiogram.fsm.storage.memory import MemoryStorage
-from aiogram.types import BotCommand, MenuButtonWebApp, WebAppInfo
+from aiogram.types import BotCommand, MenuButtonCommands
 
 from .bot.handlers import setup_routers
 from .bot.middlewares import premium_emoji_guard
@@ -38,8 +38,8 @@ async def setup_bot_ui(bot: Bot) -> None:
             BotCommand(command="admin", description="Панель P&C (только для P&C)"),
         ]
     )
-    if settings.webapp_url.startswith("https://"):
-        await bot.set_chat_menu_button(menu_button=MenuButtonWebApp(text="Марафон", web_app=WebAppInfo(url=settings.webapp_url + "/")))
+    # Кнопка меню возвращается к обычным командам: мини-приложения у бота больше нет.
+    await bot.set_chat_menu_button(menu_button=MenuButtonCommands())
 
 
 async def run() -> None:

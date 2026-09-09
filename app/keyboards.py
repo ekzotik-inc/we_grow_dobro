@@ -5,7 +5,6 @@ from aiogram.types import (
     InlineKeyboardMarkup,
     KeyboardButton,
     ReplyKeyboardMarkup,
-    WebAppInfo,
 )
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
@@ -32,15 +31,6 @@ def _btn(text: str, cb: str, style: str | None = None) -> InlineKeyboardButton:
         icon_custom_emoji_id=icon,
         style=style or _STYLE_BY_CHAR.get(text[:1]),
     )
-
-
-def webapp_button(text: str = "📱 Открыть приложение") -> InlineKeyboardButton | None:
-    if settings.webapp_url.startswith("https://"):
-        icon, label = emoji.button_icon(text)
-        return InlineKeyboardButton(
-            text=label, web_app=WebAppInfo(url=settings.webapp_url + "/"), icon_custom_emoji_id=icon
-        )
-    return None
 
 
 def start_kb() -> InlineKeyboardMarkup:
@@ -113,9 +103,6 @@ def main_menu_kb(user: User, pending: int = 0) -> InlineKeyboardMarkup:
 
     kb.row(_btn("⚡ Мой вклад", "me"), _btn("🏆 Рейтинг", "top"))
     kb.row(_btn("📖 Правила", "rules"), _btn("💬 Помощь", "help"))
-    wa = webapp_button("📱 Открыть приложение")
-    if wa:
-        kb.row(wa)
     if user.is_admin:
         kb.row(_btn("🛠 Панель P&C" + (f" · {pending}" if pending else ""), "adm"))
     return kb.as_markup()
@@ -211,6 +198,12 @@ def week_tabs_kb(active: int, tasks: list[Task], subs: dict[int, Submission]) ->
 def task_card_kb(task: Task, sub: Submission | None, is_open: bool, user: User) -> InlineKeyboardMarkup:
     kb = InlineKeyboardBuilder()
     active = user.status.value == "registered"
+    # Отчёт идёт в командный зачёт, поэтому без команды его не начать. Показывать кнопку,
+    # которая всё равно ответит отказом, — обманывать участника: вместо неё путь к P&C.
+    if active and is_open and not user.team_id:
+        kb.row(_btn("🤝 Попросить команду у P&C", "help:team", style="primary"))
+        kb.row(_btn("⬅️ К заданиям", f"tasks:w:{task.week}"))
+        return kb.as_markup()
     can_start = is_open and active and (sub is None or sub.status in (SubmissionStatus.rejected, SubmissionStatus.cancelled))
     if sub and sub.status == SubmissionStatus.draft and is_open:
         kb.row(_btn("📤 Продолжить отчёт", f"sub:open:{sub.id}"))
