@@ -377,6 +377,14 @@ def segment_team_kb(teams: list[Team]) -> InlineKeyboardMarkup:
     return kb.as_markup()
 
 
+def week_opened_kb(week: int) -> InlineKeyboardMarkup:
+    """Сразу после открытия недели: разослать анонс или вернуться к списку недель."""
+    kb = InlineKeyboardBuilder()
+    kb.row(_btn(f"📣 Разослать анонс недели {week}", f"adm:announce_ok:{week}", style="primary"))
+    kb.row(_btn("⬅️ Недели", "adm:weeks"))
+    return kb.as_markup()
+
+
 def weeks_admin_kb(open_numbers: list[int]) -> InlineKeyboardMarkup:
     """Главный выключатель: включённая неделя показывает свои задания участникам."""
     kb = InlineKeyboardBuilder()

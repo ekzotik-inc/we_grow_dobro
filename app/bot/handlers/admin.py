@@ -921,7 +921,23 @@ async def cb_week_toggle(cq: CallbackQuery, state: FSMContext) -> None:
     async with session() as s:
         await services.set_week_open(s, week, now_open)
         await s.commit()
-    await answer_cq(cq, f"Неделя {week} {'открыта' if now_open else 'закрыта'}")
+    if now_open:
+        # Автоматический анонс уходит по расписанию, то есть в лучшем случае на следующее утро.
+        # Открыли неделю — предлагаем сообщить участникам сразу.
+        async with session() as s:
+            tasks = await services.list_tasks(s, week)
+        await edit(
+            cq,
+            f"🟢 <b>Неделя {week} открыта</b>\n\n"
+            f"Участники уже видят {len(tasks)} {texts.plural(len(tasks), 'задание', 'задания', 'заданий')} "
+            "в разделе «Задания недели».\n\n"
+            "Разослать анонс с заданиями сейчас? Если нет — он всё равно уйдёт автоматически "
+            f"в {settings.announce_hour}:00.",
+            kb.week_opened_kb(week),
+        )
+        await answer_cq(cq, f"Неделя {week} открыта")
+        return
+    await answer_cq(cq, f"Неделя {week} закрыта")
     await cb_weeks_admin(cq, state)
 
 

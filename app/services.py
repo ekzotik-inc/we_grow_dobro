@@ -540,6 +540,22 @@ async def user_submission_for_task(s, user_id: int, task_id: int) -> Submission 
     ).scalar_one_or_none()
 
 
+async def draft_submission(s, user_id: int) -> Submission | None:
+    """Незаконченный отчёт участника.
+
+    Нужен, чтобы продолжить сдачу после перезапуска бота: состояние диалога живёт в памяти,
+    а черновик — в базе, и присланное фото не должно теряться.
+    """
+    return (
+        await s.execute(
+            select(Submission)
+            .options(selectinload(Submission.task).selectinload(Task.options), selectinload(Submission.option))
+            .where(Submission.user_id == user_id, Submission.status == SubmissionStatus.draft)
+            .order_by(Submission.updated_at.desc())
+        )
+    ).scalars().first()
+
+
 async def user_submissions(s, user_id: int) -> list[Submission]:
     return list((await s.execute(_sub_query().where(Submission.user_id == user_id).order_by(Submission.week, Submission.task_id))).scalars())
 

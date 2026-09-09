@@ -99,6 +99,25 @@ def check_admin_access() -> None:
     assert "admin" in [c.command for c in STAFF_COMMANDS]
 
 
+_DISPATCHER = None
+
+
+def build_dispatcher():
+    """Диспетчер собирается один раз: роутеры — модульные объекты и к двум диспетчерам не крепятся."""
+    global _DISPATCHER
+    if _DISPATCHER is None:
+        from aiogram import Dispatcher
+        from aiogram.fsm.storage.memory import MemoryStorage
+
+        from app.bot.handlers import setup_routers
+
+        dp = Dispatcher(storage=MemoryStorage())
+        root = setup_routers()
+        dp.include_router(root)
+        _DISPATCHER = (dp, root)
+    return _DISPATCHER
+
+
 async def check_admin_router_blocks() -> None:
     """Через диспетчер: участник не должен попадать ни в /admin, ни в кнопки панели.
 
@@ -107,22 +126,21 @@ async def check_admin_router_blocks() -> None:
     """
     import datetime
 
-    from aiogram import Bot, Dispatcher
-    from aiogram.fsm.storage.memory import MemoryStorage
+    from aiogram import Bot
     from aiogram.types import CallbackQuery, Chat, Message, Update
     from aiogram.types import User as TgUser
 
-    from app.bot.handlers import setup_routers
-
     bot = Bot("123:test-token")
-    dp = Dispatcher(storage=MemoryStorage())
-    root = setup_routers()
-    dp.include_router(root)
+    dp, root = build_dispatcher()
 
     seen: list[str] = []
+    # Подменяем обработчики заглушками, чтобы видеть, кто сработал, и обязательно возвращаем
+    # оригиналы: роутеры общие на весь процесс, и следующие проверки работали бы с заглушками.
+    originals = []
     for r in root.sub_routers:
         for obs in (r.message, r.callback_query):
             for h in obs.handlers:
+                originals.append((h, h.callback))
                 def wrap(name=f"{r.name}.{h.callback.__name__}"):
                     async def inner(*a, **k):
                         seen.append(name)
@@ -163,8 +181,93 @@ async def check_admin_router_blocks() -> None:
             seen.clear()
             await dp.feed_update(bot, callback_update(staff, data))
             assert seen == [expected], f"сотруднику {staff} недоступно {data}: {seen}"
+
+    for handler, callback in originals:
+        object.__setattr__(handler, "callback", callback)
     await bot.session.close()
     print("admin router ok")
+
+
+async def check_report_edge_cases() -> None:
+    """Два случая, на которых участник терял работу: перезапуск и альбом фото."""
+    import datetime
+
+    from aiogram import Bot
+    from aiogram.types import CallbackQuery, Chat, Message, PhotoSize, Update
+    from aiogram.types import User as TgUser
+
+    uid = 8484
+    async with SessionLocal() as s:
+        u = await services.get_or_create_user(s, uid, "edge")
+        await services.register_user(s, u, "Крайний Случай", "IT", "Ташкент", phone="+998901234567")
+        await services.approve_user(s, u, sorted(settings.admin_ids)[0])
+        await s.commit()
+        # Нужно задание минимум с двумя фото-шагами: такие есть не в каждой неделе,
+        # поэтому недели открываем все и в конце возвращаем как было.
+        for w in (1, 2, 3):
+            await services.set_week_open(s, w, True)
+        await s.commit()
+        photo_tasks = [t for t in await services.list_tasks(s) if len([x for x in t.steps if x["kind"] != "note"]) >= 2]
+        assert photo_tasks, "нужно задание хотя бы с двумя фото-шагами"
+        task = photo_tasks[0]
+        task_id = task.id
+
+    class Session:
+        def __init__(self, bot): self.n = 0
+        async def __call__(self, bot, method, timeout=None):
+            self.n += 1
+            if type(method).__name__ in ("SendMessage", "EditMessageText"):
+                return Message(message_id=self.n, date=datetime.datetime.now(),
+                               chat=Chat(id=uid, type="private"),
+                               from_user=TgUser(id=1, is_bot=True, first_name="b"), text="ok")
+            return True
+        async def close(self): pass
+
+    def photo_update(group, n):
+        return Update(update_id=n, message=Message(
+            message_id=200 + n, date=datetime.datetime.now(), chat=Chat(id=uid, type="private"),
+            from_user=TgUser(id=uid, is_bot=False, first_name="U"), media_group_id=group,
+            photo=[PhotoSize(file_id=f"f{n}", file_unique_id=f"f{n}", width=10, height=10)]))
+
+    def start_update():
+        return Update(update_id=1, callback_query=CallbackQuery(
+            id="1", from_user=TgUser(id=uid, is_bot=False, first_name="U"), chat_instance="1",
+            data=f"sub:start:{task_id}:0",
+            message=Message(message_id=1, date=datetime.datetime.now(), chat=Chat(id=uid, type="private"),
+                            from_user=TgUser(id=uid, is_bot=False, first_name="U"), text="x")))
+
+    bot = Bot("123:test-token")
+    bot.session = Session(bot)
+    dp, _ = build_dispatcher()
+
+    # 1. Черновик есть в базе, состояние диалога потеряно (перезапуск) — файл не должен пропасть.
+    async with SessionLocal() as s:
+        user = await services.get_user(s, uid)
+        t = await services.get_task(s, task_id)
+        sub = await services.start_submission(s, user, t, None)
+        await s.commit()
+        sub_id = sub.id
+    await dp.feed_update(bot, photo_update(None, 1))
+    async with SessionLocal() as s:
+        sub = await services.get_submission(s, sub_id)
+        assert len(sub.files or []) == 1, "файл после перезапуска потерян"
+
+    # 2. Альбом: в шаг попадает ровно одно фото, остальные не занимают следующие шаги.
+    await dp.feed_update(bot, start_update())
+    for i in range(3):
+        await dp.feed_update(bot, photo_update("ALBUM", 10 + i))
+    async with SessionLocal() as s:
+        sub = await services.get_submission(s, sub_id)
+        from collections import Counter
+        per_step = Counter(f.get("step") for f in (sub.files or []))
+        assert all(n == 1 for n in per_step.values()), f"альбом разложился по шагам неверно: {per_step}"
+        user = await services.get_user(s, uid)
+        await services.delete_user(s, user)
+        for w in (2, 3):
+            await services.set_week_open(s, w, False)
+        await s.commit()
+    await bot.session.close()
+    print("report edge cases ok")
 
 
 async def check_missing_user_buttons() -> None:
@@ -581,6 +684,7 @@ async def main() -> None:
     await check_admin_router_blocks()
     await check_pc_can_moderate()
     await check_missing_user_buttons()
+    await check_report_edge_cases()
 
     # Служебный HTTP: хостинг проверяет живость этим адресом, интерфейса больше нет.
     client = TestClient(app)

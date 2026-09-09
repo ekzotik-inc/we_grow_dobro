@@ -189,10 +189,46 @@ def _file_from_message(m: Message) -> dict | None:
     return None
 
 
+async def resume_draft(message: Message, state: FSMContext) -> bool:
+    """Вернуть участника в его незаконченный отчёт после перезапуска бота.
+
+    Состояние диалога живёт в памяти процесса, а черновик — в базе. Без этого присланное
+    фото просто исчезало: обработчик шага не срабатывал, и участник видел тишину.
+    """
+    async with session() as s:
+        user = await load_user(s, message.from_user)
+        sub = await services.draft_submission(s, user.id)
+        if sub is None:
+            return False
+        sub_id = sub.id
+    await state.set_state(SubmissionFlow.collecting)
+    await state.update_data(sub_id=sub_id, step=None, step_msgs={})
+    return True
+
+
 @router.message(SubmissionFlow.collecting, F.photo | F.document | F.video)
 async def sub_file(message: Message, state: FSMContext) -> None:
     data = await state.get_data()
     sub_id = data.get("sub_id")
+
+    # Альбом: телефон отправляет выбранные скопом фото отдельными сообщениями с общим
+    # media_group_id. Без этой проверки второе фото уходило бы в следующий шаг, третье —
+    # в третий, и «фото до» оказывалось бы «фото после».
+    group = message.media_group_id
+    if group and data.get("album") == group:
+        await delete_quietly(message)
+        sub = None
+        async with session() as s:
+            user = await load_user(s, message.from_user)
+            sub = await services.get_submission(s, sub_id) if sub_id else None
+            if sub is None or sub.user_id != user.id:
+                return
+        await _open_editor(message, state, sub, data.get("step"),
+                           "Из альбома взял только первое фото. Остальные пришли по одному — "
+                           "каждое на своём шаге.")
+        return
+    if group:
+        await state.update_data(album=group)
     file = _file_from_message(message)
     async with session() as s:
         user = await load_user(s, message.from_user)

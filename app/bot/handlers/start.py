@@ -306,6 +306,33 @@ async def stray_admin_click(cq: CallbackQuery, state: FSMContext) -> None:
     await edit(cq, text, markup)
 
 
+@fallback_router.message(F.photo | F.document | F.video)
+async def stray_media(message: Message, state: FSMContext) -> None:
+    """Фото или файл, которого никто не ждал.
+
+    Обычно это продолжение отчёта после перезапуска сервиса: черновик есть в базе,
+    а состояние диалога потеряно. Возвращаем участника в отчёт и передаём файл дальше,
+    иначе он пропадает молча.
+    """
+    from .tasks import resume_draft, sub_file
+
+    if await resume_draft(message, state):
+        await sub_file(message, state)
+        return
+    async with session() as s:
+        user = await load_user(s, message.from_user)
+        registered = user.status == UserStatus.registered
+    await delete_quietly(message)
+    if registered:
+        await message.answer(
+            "📷 <b>Файл получен, но он ни к чему не привязан</b>\n\n"
+            "Открой задание и нажми «Сделать и отправить отчёт» — там я приму его в нужный шаг.",
+            reply_markup=kb.back_kb("tasks", "📋 Задания недели"),
+        )
+        return
+    await _fallback_menu(message, state)
+
+
 @fallback_router.message(F.contact)
 async def stray_contact(message: Message, state: FSMContext) -> None:
     """Номер прислали, а бот его не ждал — не молчим, а продолжаем анкету."""
