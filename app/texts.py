@@ -456,7 +456,7 @@ def task_card(task: Task, sub: Submission | None, number: int | None = None) -> 
 KIND_WORD = {
     "photo": ("📷", "Пришлите фото", "фото"),
     "file": ("📎", "Пришлите файл", "файл"),
-    "note": ("✍️", "Напишите сообщением", "текст"),
+    "note": ("✍️", "Напишите ответ", "текст"),
 }
 
 
@@ -498,7 +498,9 @@ def submission_step(sub: Submission, index: int, warning: str = "") -> str:
         lines.append(f"{rule('Что не подойдёт')}\n{e(st['avoid'])}")
 
     lines.append("")
-    lines.append(f"<b>{action} следующим сообщением</b> — я приму и открою следующий шаг.")
+    # На последнем незакрытом шаге обещать «следующий шаг» нельзя — дальше экран отправки.
+    tail_action = "я приму и открою следующий шаг." if left else "я приму и покажу отчёт целиком."
+    lines.append(f"<b>{action} следующим сообщением</b> — {tail_action}")
 
     if warning:
         lines.append("")
