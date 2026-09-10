@@ -683,15 +683,35 @@ async def start_submission(s, user: User, task: Task, option_id: int | None) -> 
     if sub is None:
         sub = Submission(user_id=user.id, task_id=task.id, week=task.week)
         s.add(sub)
-    # rejected / cancelled / draft -> reset and start over
+    # rejected / cancelled / draft -> начинаем с чистого листа
     sub.option_id = option.id if option else None
+    reset_submission(sub)
+    await s.flush()
+    return await get_submission(s, sub.id)
+
+
+def reset_submission(sub: Submission) -> None:
+    """Обнулить отчёт перед новой попыткой.
+
+    Стирается всё, что осталось от прошлой сдачи. Пропустить хотя бы одно поле нельзя:
+    оставшиеся `answers` делают текстовые шаги «уже выполненными», а несброшенный `step`
+    уводит участника сразу на экран отправки — и отчёт уходил на проверку со старыми
+    ответами, хотя человек ничего не переснял.
+    """
     sub.status = SubmissionStatus.draft
     sub.note = None
     sub.files = []
+    sub.answers = {}
+    sub.step = 0
     sub.points_awarded = 0
     sub.review_comment = None
-    await s.flush()
-    return await get_submission(s, sub.id)
+    sub.reviewed_by = None
+    sub.reviewed_at = None
+    sub.submitted_at = None
+    # Карточка прошлой попытки остаётся в канале как есть: новая попытка публикуется
+    # отдельной карточкой, иначе бот отредактировал бы уже закрытое решение P&C.
+    sub.channel_message_id = None
+    sub.channel_media_ids = []
 
 
 async def add_file(s, sub: Submission, file: dict, step: int | None = None) -> int:

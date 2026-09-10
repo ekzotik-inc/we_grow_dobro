@@ -512,6 +512,67 @@ async def check_registration_resume() -> None:
     print("registration resume ok")
 
 
+async def check_resubmission_resets() -> None:
+    """Пересдача начинается с нуля.
+
+    Раньше при повторной отправке оставались ответы прошлой попытки: текстовые шаги
+    считались выполненными, мастер прыгал сразу на экран отправки, и отчёт уходил на
+    проверку со старым текстом, хотя участник ничего не переделывал.
+    """
+    async with SessionLocal() as s:
+        await services.set_week_open(s, 1, True)
+        await s.commit()
+        await services.load_open_weeks(s)
+        u = await services.get_or_create_user(s, 6161, "resub")
+        await services.register_user(s, u, "Пётр Пересдач", "IT", "Ташкент")
+        await services.approve_user(s, u, 999)
+        await s.commit()
+        task = next(t for t in await services.list_tasks(s, 1) if not t.has_options)
+
+        sub = await services.start_submission(s, u, task, None)
+        await fill_steps(s, sub)
+        await services.send_for_review(s, sub)
+        sub.channel_message_id = 12345
+        await s.commit()
+
+        # P&C отклоняет отчёт.
+        await services.review_submission(s, sub, approve=False, reviewer_tg_id=999, comment="не видно стены")
+        await s.commit()
+        assert sub.status == SubmissionStatus.rejected
+
+        # Участник открывает задание заново.
+        sub = await services.start_submission(s, u, task, None)
+        await s.commit()
+        assert sub.files == [] and sub.answers == {}, "ответы прошлой попытки должны стереться"
+        assert sub.step == 0 and sub.note is None
+        assert sub.channel_message_id is None, "новая попытка не должна править старую карточку"
+        assert sub.review_comment is None and sub.points_awarded == 0
+        steps = services.submission_steps(sub)
+        if steps:
+            assert services.first_unfinished_step(sub) == 0, "мастер обязан начинаться с первого шага"
+            assert len(services.steps_left(sub)) == len([x for x in steps if not x.get("optional")])
+        missing = services.submission_missing(sub)
+        assert missing, "пустой отчёт не может считаться готовым"
+        try:
+            await services.send_for_review(s, sub)
+            raise AssertionError("пустой отчёт ушёл на проверку")
+        except services.ServiceError:
+            pass
+
+        # Та же проверка после отмены зачёта владельцем.
+        await fill_steps(s, sub)
+        await services.send_for_review(s, sub)
+        await services.review_submission(s, sub, approve=True, reviewer_tg_id=999, comment=None)
+        await s.commit()
+        await services.revoke_review(s, sub, actor_tg_id=999, reason="ошибка проверки")
+        await s.commit()
+        sub = await services.start_submission(s, u, task, None)
+        await s.commit()
+        assert sub.answers == {} and sub.files == [] and sub.step == 0
+        assert services.submission_missing(sub), "после отмены зачёта отчёт снова пустой"
+    print("resubmission reset ok")
+
+
 async def check_prizes() -> None:
     """Экран призов: читается из data/prizes.json и не показывает незаполненные зачёты."""
     texts.prizes.__globals__["_PRIZES"] = None  # перечитать файл, а не кеш прошлой проверки
@@ -851,6 +912,7 @@ async def main() -> None:
     await check_missing_user_buttons()
     await check_report_edge_cases()
     await check_manual_results()
+    await check_resubmission_resets()
     await check_prizes()
     await check_invite_link()
     await check_weekly_broadcast()
