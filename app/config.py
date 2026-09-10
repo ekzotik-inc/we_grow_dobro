@@ -103,7 +103,7 @@ class Settings:
     marathon_title: str = os.getenv("MARATHON_TITLE", "Марафон добрых дел «We Grow Dobro»")
     pc_contact: str = os.getenv("PC_CONTACT", "сотрудник P&C")
     # Telegram-логин сотрудника P&C: участник получает прямую ссылку, чтобы не искать контакт.
-    pc_username: str = os.getenv("PC_USERNAME", "").strip().lstrip("@")
+    pc_username: str = os.getenv("PC_USERNAME", "DaryaPMI").strip().lstrip("@")
     # Код страны для номеров, набранных без него: «90 123 45 67» -> «+998 90 123 45 67».
     phone_country_code: str = os.getenv("PHONE_COUNTRY_CODE", "998").strip().lstrip("+")
     announce_hour: int = int(os.getenv("ANNOUNCE_HOUR", "10"))
