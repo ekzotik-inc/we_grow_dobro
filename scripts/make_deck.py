@@ -182,6 +182,39 @@ def _steps_slide(prs, step, title, subtitle, bullets, shots, *, note=None):
     _shots(s, shots, Inches(7.45), Inches(0.55), Inches(5.5), Inches(6.4))
 
 
+def _prizes(prs):
+    """Слайд призов: текст берём из data/prizes.json, чтобы он не разошёлся с ботом."""
+    import json
+
+    data = json.loads((ROOT / "data" / "prizes.json").read_text(encoding="utf-8"))
+    s = prs.slides.add_slide(prs.slide_layouts[6])
+    _bg(s)
+    _text(s, Inches(0.9), Inches(0.7), Inches(11.5), Inches(1.0), [
+        ("За что боремся", 40, TEXT, True, 0),
+        ("Итоги подводим после последней недели марафона.", 16, MUTED, False, 8),
+    ])
+    cards = [("⭐", data.get("personal", {})), ("🏆", data.get("team", {}))]
+    x0, y0 = Inches(0.9), Inches(2.15)
+    cw, ch = Inches(5.65), Inches(4.2)
+    for i, (icon, block) in enumerate(cards):
+        if not block.get("title"):
+            continue
+        cx = x0 + (cw + Inches(0.5)) * i
+        _box(s, cx, y0, cw, ch)
+        blocks = [(block["title"], 26, GOLD, True, 0)]
+        if block.get("who"):
+            blocks.append((block["who"], 15, MUTED, False, 6))
+        if block.get("reward"):
+            blocks.append((block["reward"], 19, TEXT, True, 16))
+        for area in block.get("areas") or []:
+            blocks.append(("•  " + area, 16, TEXT, False, 10))
+        if block.get("note"):
+            blocks.append((block["note"], 13, MUTED, False, 18))
+        _text(s, cx + Inches(0.35), y0 + Inches(0.35), cw - Inches(0.7), ch, blocks)
+    _text(s, Inches(0.9), Inches(6.6), Inches(11.5), Inches(0.5),
+          [("Своё место видно в боте в любой момент — раздел «Призы».", 15, MUTED, False, 0)])
+
+
 def _closing(prs):
     s = prs.slides.add_slide(prs.slide_layouts[6])
     _bg(s)
@@ -193,6 +226,7 @@ def _closing(prs):
         ("4.  Открыть «Задания недели» и выбрать дело", 20, TEXT, False, 12),
         ("5.  Сделать доброе дело и прислать отчёт по шагам", 20, TEXT, False, 12),
         ("6.  Получить баллы и следить за рейтингом", 20, TEXT, False, 12),
+        ("7.  Побороться за призы: ТОП-10 и команда-победитель", 20, TEXT, False, 12),
         ("Вопросы — раздел «Помощь» в боте.", 17, MUTED, False, 26),
     ])
     _shots(s, ["14_help"], Inches(8.6), Inches(0.7), Inches(4.1), Inches(6.1))
@@ -208,6 +242,7 @@ def build() -> Path:
     _title_slide(prs)
     _agenda(prs)
     _weeks(prs)
+    _prizes(prs)
 
     _steps_slide(
         prs, "ШАГ 1 · РЕГИСТРАЦИЯ", "Знакомимся",

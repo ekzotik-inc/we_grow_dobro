@@ -584,8 +584,17 @@ async def check_prizes() -> None:
     if not data.get("team", {}).get("who") and not data.get("team", {}).get("reward"):
         assert "Командный зачёт" not in screen, "пустой зачёт показывать нельзя"
     assert texts.prizes_screen(1200, 3, 40, "🌱 Команда: <b>Х</b>").count("Команда") >= 1
-    # Оборванная на двоеточии фраза без списка направлений недопустима.
-    assert "сферах:" not in screen, screen
+    # Фраза, оборванная на двоеточии, допустима только когда список под ней есть.
+    personal = data.get("personal", {})
+    if personal.get("reward", "").rstrip().endswith(":"):
+        assert personal.get("areas"), "двоеточие без списка — фраза оборвётся на экране"
+        for area in personal["areas"]:
+            assert area in screen, f"направление «{area}» не попало на экран"
+    if personal.get("areas"):
+        assert screen.count("•") >= len(personal["areas"])
+    team = data.get("team", {})
+    if team.get("who") or team.get("reward"):
+        assert "Командный зачёт" in screen
     print("prizes ok")
 
 
