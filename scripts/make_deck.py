@@ -153,7 +153,11 @@ def _weeks(prs):
         cx = x0 + (cw + Inches(0.4)) * i
         _box(s, cx, y0, cw, ch)
         total = sum(int(r.rsplit("—", 1)[1]) for r in rows)
-        blocks = [(head, 24, GOLD, True, 0), (f"{total} баллов за неделю", 13, MUTED, False, 2)]
+        from app.config import settings as cfg
+
+        period = cfg.weeks[i].label.replace("–", "—")
+        blocks = [(head, 24, GOLD, True, 0),
+                  (f"{period} · {total} баллов", 13, MUTED, False, 2)]
         for r in rows:
             blocks.append(("•  " + r, 15, TEXT, False, 14))
         _text(s, cx + Inches(0.32), y0 + Inches(0.35), cw - Inches(0.64), ch, blocks)

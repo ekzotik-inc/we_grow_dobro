@@ -57,6 +57,18 @@ services:
         value: "11"
       - key: TOP_HOUR          # час публикации топа (среда и воскресенье)
         value: "19"
+      - key: WEEK1_START       # периоды марафона; конец недели — включительно
+        value: "2026-09-10"
+      - key: WEEK1_END
+        value: "2026-09-13"
+      - key: WEEK2_START
+        value: "2026-09-14"
+      - key: WEEK2_END
+        value: "2026-09-20"
+      - key: WEEK3_START
+        value: "2026-09-21"
+      - key: WEEK3_END
+        value: "2026-09-27"
       - key: WEEKLY_WEEKDAY    # день еженедельной мотивации: 0 — понедельник
         value: "0"
       - key: WEEKLY_HOUR       # час еженедельной мотивации

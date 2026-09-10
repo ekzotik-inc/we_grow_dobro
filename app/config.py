@@ -131,9 +131,9 @@ class Settings:
 
     def __post_init__(self) -> None:
         self.weeks = [
-            Week(1, _parse_date(os.getenv("WEEK1_START"), date(2026, 9, 9)), _parse_date(os.getenv("WEEK1_END"), date(2026, 9, 15))),
-            Week(2, _parse_date(os.getenv("WEEK2_START"), date(2026, 9, 16)), _parse_date(os.getenv("WEEK2_END"), date(2026, 9, 22))),
-            Week(3, _parse_date(os.getenv("WEEK3_START"), date(2026, 9, 23)), _parse_date(os.getenv("WEEK3_END"), date(2026, 9, 30))),
+            Week(1, _parse_date(os.getenv("WEEK1_START"), date(2026, 9, 10)), _parse_date(os.getenv("WEEK1_END"), date(2026, 9, 13))),
+            Week(2, _parse_date(os.getenv("WEEK2_START"), date(2026, 9, 14)), _parse_date(os.getenv("WEEK2_END"), date(2026, 9, 20))),
+            Week(3, _parse_date(os.getenv("WEEK3_START"), date(2026, 9, 21)), _parse_date(os.getenv("WEEK3_END"), date(2026, 9, 27))),
         ]
 
     @property
