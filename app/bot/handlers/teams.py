@@ -96,6 +96,27 @@ async def cb_team_invite(cq: CallbackQuery) -> None:
     await answer_cq(cq)
 
 
+@router.callback_query(F.data == "prizes")
+async def cb_prizes(cq: CallbackQuery, state: FSMContext) -> None:
+    """Призы марафона и место участника в личном зачёте."""
+    await state.clear()
+    async with session() as s:
+        user = await load_user(s, cq.from_user)
+        my_points = await services.user_points(s, user.id)
+        rank, total = await services.participant_rank(s, user.id)
+        team_line = None
+        if user.team_id:
+            rows = await services.leaderboard(s)
+            for i, r in enumerate(rows, 1):
+                if r["team"].id == user.team_id:
+                    team_line = texts.row("🌱", "Команда",
+                                          f"{texts.e(r['team'].emoji)} {texts.e(r['team'].name)}",
+                                          f"{r['points']} б. · место #{i} из {len(rows)}")
+        text = texts.prizes_screen(my_points, rank, total, team_line)
+    await edit(cq, text, kb.back_kb())
+    await answer_cq(cq)
+
+
 # ---------- help from P&C ----------
 
 @router.callback_query(F.data == "help")

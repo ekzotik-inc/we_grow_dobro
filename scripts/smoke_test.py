@@ -512,6 +512,22 @@ async def check_registration_resume() -> None:
     print("registration resume ok")
 
 
+async def check_prizes() -> None:
+    """Экран призов: читается из data/prizes.json и не показывает незаполненные зачёты."""
+    texts.prizes.__globals__["_PRIZES"] = None  # перечитать файл, а не кеш прошлой проверки
+    data = texts.prizes()
+    assert data.get("personal", {}).get("who"), "личный зачёт должен быть описан"
+    screen = texts.prizes_screen(0, None, 10, None)
+    assert "Призы марафона" in screen and len(screen) <= 4096
+    assert "Личный зачёт" in screen
+    if not data.get("team", {}).get("who") and not data.get("team", {}).get("reward"):
+        assert "Командный зачёт" not in screen, "пустой зачёт показывать нельзя"
+    assert texts.prizes_screen(1200, 3, 40, "🌱 Команда: <b>Х</b>").count("Команда") >= 1
+    # Оборванная на двоеточии фраза без списка направлений недопустима.
+    assert "сферах:" not in screen, screen
+    print("prizes ok")
+
+
 async def check_invite_link() -> None:
     """Приглашение в команду: анкета сокращается до двух шагов, команда подставляется сама."""
     async with SessionLocal() as s:
@@ -835,6 +851,7 @@ async def main() -> None:
     await check_missing_user_buttons()
     await check_report_edge_cases()
     await check_manual_results()
+    await check_prizes()
     await check_invite_link()
     await check_weekly_broadcast()
 

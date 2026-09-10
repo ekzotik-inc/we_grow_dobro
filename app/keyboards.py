@@ -104,6 +104,7 @@ def main_menu_kb(user: User, pending: int = 0) -> InlineKeyboardMarkup:
         kb.row(_btn("📋 Задания недели", "tasks"))
 
     kb.row(_btn("⚡ Мой вклад", "me"), _btn("🏆 Рейтинг", "top"))
+    kb.row(_btn("🎁 Призы", "prizes"))
     kb.row(_btn("📖 Правила", "rules"), _btn("💬 Помощь", "help"))
     # Кнопка панели — по тому же правилу, что и доступ к ней: только ADMIN_IDS / PC_IDS.
     if settings.is_admin(user.tg_id):
@@ -117,6 +118,7 @@ def pending_kb(user: User) -> InlineKeyboardMarkup:
     kb.row(_btn("🔄 Проверить, приняли ли заявку", "menu"))
     if user.status.value == "rejected":
         kb.row(_btn("📝 Заполнить анкету заново", "reg:start"))
+    kb.row(_btn("🎁 Призы", "prizes"))
     kb.row(_btn("📖 Правила", "rules"), _btn("💬 Помощь", "help"))
     return kb.as_markup()
 

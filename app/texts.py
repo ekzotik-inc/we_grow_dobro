@@ -95,6 +95,9 @@ RULES = f"""📜 <b>Правила марафона</b>
 У каждого задания есть условия зачёта — что именно приложить к отчёту. Дело засчитывается, только когда выполнено всё, что там перечислено.
 Фото, скриншоты и описания проверяет сотрудник P&amp;C — баллы приходят после подтверждения.
 
+🎁 <b>За что боремся</b>
+В конце марафона подводим личный и командный зачёт — что именно получают победители, смотри в разделе «Призы».
+
 ⛔️ <b>Единственное «нельзя»</b>
 Нарушение правил — это дисквалификация, и результаты снимаются с командного зачёта. Но, честно говоря, тут не за что нарушать: марафон про добрые дела.
 
@@ -794,6 +797,81 @@ def db_expiry_warning() -> str | None:
         f"🔴 <b>Внимание: база данных будет удалена {when_txt}.</b>\n"
         "Выгрузите итоги марафона, пока данные на месте: /admin → 📥 Экспорт Excel."
     )
+
+
+# ---------- призы ----------
+
+_PRIZES: dict | None = None
+
+
+def prizes() -> dict:
+    """Условия награждения из data/prizes.json — их правят без изменения кода."""
+    global _PRIZES
+    if _PRIZES is None:
+        import json
+        from pathlib import Path as _Path
+
+        path = _Path(__file__).resolve().parent.parent / "data" / "prizes.json"
+        try:
+            _PRIZES = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            _PRIZES = {}
+    return _PRIZES
+
+
+def _prize_block(data: dict, icon: str) -> list[str]:
+    """Один зачёт: кому, что и за что. Незаполненные поля просто не показываются."""
+    if not data or not data.get("title") or not (data.get("who") or data.get("reward")):
+        # Незаполненный зачёт не показываем вовсе: пустой заголовок выглядит как ошибка.
+        return []
+    areas = data.get("areas") or []
+    lines = [f"{icon} <b>{e(data['title'])}</b>"]
+    if data.get("who"):
+        lines.append(e(data["who"]))
+    if data.get("reward"):
+        reward = data["reward"]
+        if not areas:
+            # Список направлений ещё не утверждён — не обрываем фразу на двоеточии.
+            reward = reward.rstrip(" :")
+        lines.append(f"<b>{e(reward)}</b>" if not areas else e(reward))
+    for area in areas:
+        lines.append(f"• {e(area)}")
+    if data.get("reward") and data["reward"].rstrip().endswith(":") and not areas:
+        lines.append("<i>Список направлений добавим до конца первой недели.</i>")
+    if data.get("note"):
+        lines.append(f"<i>{e(data['note'])}</i>")
+    lines.append("")
+    return lines
+
+
+def prizes_screen(my_points: int, rank: int | None, total: int, team_line: str | None) -> str:
+    """Экран «Призы»: за что борются и где сейчас участник."""
+    data = prizes()
+    lines = ["🎁 <b>Призы марафона</b>", "<i>итоги подводим после последней недели</i>", ""]
+    body = _prize_block(data.get("personal", {}), "⭐") + _prize_block(data.get("team", {}), "🏆")
+    if body:
+        lines += body
+    else:
+        lines += ["Условия награждения уточняются — как только их утвердят, они появятся здесь.", ""]
+
+    lines.append(rule("Где ты сейчас"))
+    place = f"место <b>#{rank}</b> из {total}" if rank else "места пока нет — нужен первый зачтённый отчёт"
+    lines.append(row("⚡", "Мои баллы", num(my_points), place))
+    if team_line:
+        lines.append(team_line)
+    lines.append("")
+    if data.get("closing"):
+        lines.append(f"<i>{e(data['closing'])}</i>")
+        lines.append("")
+    top = (data.get("personal") or {}).get("who") or ""
+    if rank and "ТОП-10" in top and rank <= 10:
+        hint = "Ты в десятке. Держись — до конца марафона всё ещё может перевернуться."
+    elif rank:
+        hint = "Каждое зачтённое дело двигает вверх и тебя, и команду. Ближайшее — в «Заданиях недели»."
+    else:
+        hint = "Первое зачтённое дело сразу ставит тебя в таблицу. Начни с самого простого."
+    lines.append(voice(hint))
+    return "\n".join(lines)
 
 
 def help_screen() -> str:
