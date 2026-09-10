@@ -111,6 +111,7 @@ python -m scripts.smoke_test       # бизнес-логика, права, ми
 python -m scripts.audit_callbacks  # каждая кнопка нажимается от лица трёх ролей
 python -m scripts.audit_texts      # HTML и лимиты длины на каждом экране
 python -m scripts.preview          # все экраны текстом, прочитать глазами
+python -m scripts.audit_pushes     # уведомление пользователю на каждое решение модератора
 python -m scripts.preflight        # готовность к запуску: настройки, каналы, контент
 ```
 

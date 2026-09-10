@@ -159,7 +159,8 @@ async def _notify_user(bot, sub, approved: bool) -> None:
     if approved:
         text = (
             f"✅ <b>{texts.e(sub.task.title)} — зачтено</b>\n"
-            f"+{sub.points_awarded} б. команде"
+            # Баллы идут и участнику, и команде — формулировка «команде» вводила в заблуждение.
+            f"+{sub.points_awarded} б. тебе и команде"
             + (f"\n\n{texts.e(sub.review_comment)}" if sub.review_comment else "")
             + "\n\n" + texts.voice(f"Спасибо за это дело {texts.plain('heart')}")
         )

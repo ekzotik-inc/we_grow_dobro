@@ -349,8 +349,10 @@ async def cb_wipe_user_ok(cq: CallbackQuery, state: FSMContext) -> None:
         info = await services.clear_user_results(s, user, cq.from_user.id)
         await s.commit()
         tg_id, name = user.tg_id, user.display_name
-    if info["points"]:
-        await _notify(cq.bot, type("U", (), {"tg_id": tg_id})(), texts.push_results_cleared(info["points"]))
+    if info["points"] or info["submissions"]:
+        # Баллов могло и не быть, но отчёты удалены — человек должен об этом узнать.
+        await _notify(cq.bot, type("U", (), {"tg_id": tg_id})(),
+                      texts.push_results_cleared(info["points"], info["submissions"]))
     await edit(cq, f"🗑 <b>Результаты обнулены</b>\n<i>{texts.e(name)}</i>\n\n"
                    + texts.row("📤", "Удалено отчётов", str(info["submissions"])) + "\n"
                    + texts.row("⭐", "Снято баллов", texts.num(info["points"])),
@@ -417,13 +419,17 @@ async def cb_wipe_team_ok(cq: CallbackQuery, state: FSMContext) -> None:
         if team is None:
             await answer_cq(cq, "Команда не найдена", alert=True)
             return
-        members = [(m.tg_id, await services.user_points(s, m.id)) for m in services.team_active_members(team)]
+        members = [
+            (m.tg_id, await services.user_points(s, m.id), len(await services.user_submissions(s, m.id)))
+            for m in services.team_active_members(team)
+        ]
         info = await services.clear_team_results(s, team, cq.from_user.id)
         await s.commit()
         name = f"{team.emoji} {team.name}"
-    for tg_id, had in members:
-        if had:
-            await _notify(cq.bot, type("U", (), {"tg_id": tg_id})(), texts.push_results_cleared(had))
+    for tg_id, had, subs in members:
+        # Уведомляем каждого, чьи результаты действительно тронули: баллы или отчёты.
+        if had or subs:
+            await _notify(cq.bot, type("U", (), {"tg_id": tg_id})(), texts.push_results_cleared(had, subs))
     await edit(cq, f"🗑 <b>Результаты команды обнулены</b>\n<i>{texts.e(name)}</i>\n\n"
                    + texts.row("👥", "Участников", str(info["members"])) + "\n"
                    + texts.row("📤", "Удалено отчётов", str(info["submissions"])) + "\n"

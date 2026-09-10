@@ -141,6 +141,7 @@ python -m scripts.audit_texts      # HTML и лимиты длины на каж
 python -m scripts.audit_callbacks  # все кнопки от имени админа, P&C и участника
 python -m scripts.audit_rules      # правила марафона на живых данных
 python -m scripts.audit_jobs       # каналы, фоновые задачи, экспорт, рассылки
+python -m scripts.audit_pushes     # уведомления участнику на каждое решение админа и P&C
 ```
 
 В текстах сообщений `&` пишется как `&amp;` — это требование Telegram HTML.

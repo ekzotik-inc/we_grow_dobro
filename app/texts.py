@@ -1061,12 +1061,18 @@ def push_review_revoked(task_title: str, points: int, reason: str) -> str:
     )
 
 
-def push_results_cleared(points: int) -> str:
-    return (
-        "🗑 <b>Результаты обнулены</b>\n\n"
-        + row("➖", "Снято баллов", num(points)) + "\n\n"
-        + voice("Отчёты можно отправить заново — задания открытых недель на месте.")
-    )
+def push_results_cleared(points: int, submissions: int = 0) -> str:
+    """Уведомление об обнулении. Баллов могло и не быть — тогда говорим про отчёты."""
+    lines = ["🗑 <b>Результаты обнулены</b>", ""]
+    if points:
+        lines.append(row("➖", "Снято баллов", num(points)))
+    if submissions:
+        lines.append(row("📤", "Удалено отчётов", str(submissions)))
+    if not points and not submissions:
+        lines.append("Все отправленные дела удалены.")
+    lines.append("")
+    lines.append(voice("Отчёты можно отправить заново — задания открытых недель на месте."))
+    return "\n".join(lines)
 
 
 def push_disqualified(reason: str) -> str:
