@@ -604,23 +604,67 @@ def submission_editor(sub: Submission) -> str:
     return "\n".join(lines)
 
 
+def participant_answers(sub: Submission) -> str:
+    """Ответы участника цитатой — их должно быть видно с первого взгляда.
+
+    У пошагового отчёта каждый текстовый шаг выводится своей строкой с названием шага;
+    у старого отчёта без шагов берётся общая заметка.
+    """
+    from . import services
+
+    steps = services.submission_steps(sub)
+    answers = sub.answers or {}
+    rows = []
+    for i, st in enumerate(steps):
+        if st.get("kind") != "note":
+            continue
+        value = (answers.get(str(i)) or "").strip()
+        if value:
+            rows.append(f"<b>{e(st['title'])}</b>\n{e(value)}")
+    if not rows and (sub.note or "").strip():
+        rows.append(e(sub.note.strip()))
+    if not rows:
+        return "💬 <b>Комментарий участника</b>\n<i>нет</i>"
+    return "💬 <b>Комментарий участника</b>\n" + quote("\n\n".join(rows))
+
+
+def _review_conditions(sub: Submission) -> str:
+    """Условия зачёта — свёрнутой цитатой: занимают место, но нужны не каждый раз."""
+    body = (sub.option.conditions if sub.option else sub.task.conditions) or ""
+    if not body.strip():
+        return ""
+    return "📋 <b>Условия зачёта</b>\n" + quote(e(body.strip()), expandable=True)
+
+
+def _review_head(sub: Submission, with_department: bool) -> list[str]:
+    """Шапка карточки: кто, куда, за что. Четыре строки вместо шести."""
+    u, task = sub.user, sub.task
+    who = f"👤 <b>{e(u.display_name)}</b>" + (f" (@{e(u.username)})" if u.username else "")
+    if with_department and u.department:
+        who += f" · {e(u.department)}"
+    team = f"{e(u.team.emoji)} {e(u.team.name)}" if u.team else "без команды"
+    option = f" · «{e(sub.option.title)}»" if sub.option else ""
+    return [
+        who,
+        f"👥 {team} · неделя {sub.week}",
+        f"📋 №{task.code} {e(task.title)}{option}",
+        f"⭐ <b>{sub.target_points}</b> б. · 📎 {len(sub.files or [])}"
+        + (f" · {sub.submitted_at.strftime('%d.%m %H:%M')}" if sub.submitted_at else ""),
+    ]
+
+
 def submission_admin_card(sub: Submission, idx: int | None = None, total: int | None = None) -> str:
-    u = sub.user
-    task = sub.task
-    head = f"<b>🔎 Проверка отчёта #{sub.id}</b>" + (f" ({idx}/{total})" if idx else "")
+    head = f"🔎 <b>Проверка отчёта #{sub.id}</b>" + (f" · {idx} из {total}" if idx else "")
     lines = [head, ""]
-    lines.append(f"👤 {e(u.display_name)}" + (f" (@{e(u.username)})" if u.username else "") + (f" · {e(u.department)}" if u.department else ""))
-    lines.append(f"👥 Команда: {e(u.team.emoji + ' ' + u.team.name) if u.team else '—'}")
-    lines.append(f"📋 Задание №{task.code}: <b>{e(task.title)}</b>" + (f" · опция «{e(sub.option.title)}»" if sub.option else ""))
-    lines.append(f"⭐ К начислению: <b>{sub.target_points}</b> б. · неделя {sub.week}")
-    lines.append(f"📎 Файлов: {len(sub.files or [])}" + (f" · отправлено {sub.submitted_at.strftime('%d.%m %H:%M')}" if sub.submitted_at else ""))
+    lines += _review_head(sub, with_department=True)
     lines.append("")
-    lines.append("<b>Заметка участника:</b>")
-    lines.append(e(sub.note) if sub.note else "<i>нет</i>")
+    lines.append(participant_answers(sub))
+    conditions = _review_conditions(sub)
+    if conditions:
+        lines.append("")
+        lines.append(conditions)
     lines.append("")
-    lines.append("<b>Условия зачёта:</b>")
-    lines.append(e(sub.option.conditions if sub.option else task.conditions))
-    lines.append(f"\n{STATUS_ICON[sub.status]} Статус: {STATUS_LABEL[sub.status]}")
+    lines.append(f"{STATUS_ICON[sub.status]} {STATUS_LABEL[sub.status]}")
     return "\n".join(lines)
 
 
@@ -730,19 +774,14 @@ def registration_channel_card(user: User) -> str:
 
 def submission_channel_card(sub: Submission) -> str:
     """Report card published in the results channel (media is sent right above it)."""
-    u = sub.user
-    task = sub.task
-    lines = [f"📤 <b>Отчёт #{sub.id}</b> · неделя {sub.week}", ""]
-    lines.append(f"👤 {e(u.display_name)}" + (f" (@{e(u.username)})" if u.username else ""))
-    lines.append(f"👥 Команда: {e(u.team.emoji + ' ' + u.team.name) if u.team else '—'}")
-    lines.append(f"📋 Задание №{task.code}: <b>{e(task.title)}</b>" + (f" · опция «{e(sub.option.title)}»" if sub.option else ""))
-    lines.append(f"⭐ К начислению: <b>{sub.target_points}</b> б. · 📎 файлов: {len(sub.files or [])}")
+    lines = [f"📤 <b>Отчёт #{sub.id}</b>", ""]
+    lines += _review_head(sub, with_department=False)
     lines.append("")
-    lines.append("<b>Заметка участника:</b>")
-    lines.append(e(sub.note) if sub.note else "<i>нет</i>")
-    lines.append("")
-    lines.append("<b>Условия зачёта:</b>")
-    lines.append(e(sub.option.conditions if sub.option else task.conditions))
+    lines.append(participant_answers(sub))
+    conditions = _review_conditions(sub)
+    if conditions:
+        lines.append("")
+        lines.append(conditions)
     lines.append("")
     if sub.status == SubmissionStatus.pending:
         lines.append("⏳ <b>Ожидает проверки.</b> Баллы начисляются только после «Зачесть».")

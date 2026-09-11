@@ -512,6 +512,62 @@ async def check_registration_resume() -> None:
     print("registration resume ok")
 
 
+async def check_review_cards() -> None:
+    """Карточка проверки: ответ участника — цитатой, условия — свёрнуты, всё компактно."""
+    from app import emoji as em
+
+    async with SessionLocal() as s:
+        await services.set_week_open(s, 1, True)
+        await s.commit()
+        await services.load_open_weeks(s)
+        u = await services.get_or_create_user(s, 8181, "card")
+        await services.register_user(s, u, "Карточка Проверкина", "IT", "Ташкент")
+        await services.approve_user(s, u, 999)
+        await s.commit()
+        task = next(t for t in await services.list_tasks(s, 1) if not t.has_options)
+        sub = await services.start_submission(s, u, task, None)
+        await fill_steps(s, sub)
+        await services.send_for_review(s, sub)
+        await s.commit()
+        sub = await services.get_submission(s, sub.id)
+
+        for card in (texts.submission_admin_card(sub, 1, 3), texts.submission_channel_card(sub)):
+            assert "<blockquote>" in card, "комментарий участника должен быть цитатой"
+            assert "Комментарий участника" in card
+            assert "<blockquote expandable>" in card, "условия зачёта должны быть свёрнуты"
+            assert len(card) <= 4096, len(card)
+            # Полный текст условий больше не разворачивается в теле карточки.
+            body = card.split("<blockquote expandable>")[0]
+            assert "Идентичная деятельность" not in body, "условия остались в теле карточки"
+            answer = (sub.answers or {}).get("1") or (sub.answers or {}).get("0") or ""
+            if answer:
+                quoted = card.split("<blockquote>")[1].split("</blockquote>")[0]
+                assert texts.e(answer) in quoted, "ответ участника вне цитаты"
+
+        # В канале премиум-эмодзи снимаются, а цитата обязана пережить это.
+        in_channel = em.strip(texts.submission_channel_card(sub))
+        assert "<blockquote>" in in_channel and "<tg-emoji" not in in_channel
+
+        # Отчёт без шагов (только общая заметка) тоже показывает комментарий цитатой.
+        sub.answers = {}
+        sub.note = "Сделал доброе дело в обеденный перерыв."
+        await s.commit()
+        card = texts.submission_admin_card(sub)
+        assert "<blockquote>Сделал доброе дело" in card, card
+
+        # Пустой комментарий не ломает карточку.
+        sub.note = None
+        await s.commit()
+        assert "нет" in texts.submission_admin_card(sub)
+
+        for status in (SubmissionStatus.approved, SubmissionStatus.rejected):
+            sub.status = status
+            sub.review_comment = "нужно фото передачи"
+            await s.commit()
+            assert len(texts.submission_channel_card(sub)) <= 4096
+    print("review cards ok")
+
+
 async def check_resubmission_resets() -> None:
     """Пересдача начинается с нуля.
 
@@ -921,6 +977,7 @@ async def main() -> None:
     await check_missing_user_buttons()
     await check_report_edge_cases()
     await check_manual_results()
+    await check_review_cards()
     await check_resubmission_resets()
     await check_prizes()
     await check_invite_link()
