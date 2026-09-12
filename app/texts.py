@@ -50,6 +50,14 @@ def rule(title: str) -> str:
     return f"<b>{title}</b>"
 
 
+HR = "━━━━━━━━━━━━━━━━━━━━"
+
+
+def section(title: str) -> str:
+    """Заголовок раздела с линией: по нему глаз находит нужный кусок, не перечитывая всё."""
+    return f"{HR}\n<b>{title}</b>"
+
+
 def plural(n: int, one: str, few: str, many: str) -> str:
     """Russian noun agreement: 1 задание, 2 задания, 5 заданий."""
     if 11 <= n % 100 <= 14:
@@ -605,27 +613,63 @@ def submission_editor(sub: Submission) -> str:
 
 
 def participant_answers(sub: Submission) -> str:
-    """Ответы участника цитатой — их должно быть видно с первого взгляда.
+    """Слова участника — отдельным разделом, подписанным его именем.
 
-    У пошагового отчёта каждый текстовый шаг выводится своей строкой с названием шага;
-    у старого отчёта без шагов берётся общая заметка.
+    Проверяющий должен с первого взгляда понимать, где служебный текст бота, а где то,
+    что написал человек: раздел отбит линией, к каждому ответу указан номер шага,
+    сам текст — в кавычках внутри цитаты.
     """
     from . import services
 
     steps = services.submission_steps(sub)
     answers = sub.answers or {}
-    rows = []
+    name = e(sub.user.display_name)
+
+    blocks = []
     for i, st in enumerate(steps):
         if st.get("kind") != "note":
             continue
         value = (answers.get(str(i)) or "").strip()
-        if value:
-            rows.append(f"<b>{e(st['title'])}</b>\n{e(value)}")
-    if not rows and (sub.note or "").strip():
-        rows.append(e(sub.note.strip()))
-    if not rows:
-        return "💬 <b>Комментарий участника</b>\n<i>нет</i>"
-    return "💬 <b>Комментарий участника</b>\n" + quote("\n\n".join(rows))
+        if not value:
+            continue
+        blocks.append((f"Шаг {i + 1} из {len(steps)} · {e(st['title'])}", e(value)))
+    if not blocks and (sub.note or "").strip():
+        blocks.append(("", e(sub.note.strip())))
+
+    lines = [section(f"✍️ СЛОВА УЧАСТНИКА · {name}")]
+    if not blocks:
+        lines.append("<i>участник ничего не написал</i>")
+        return "\n".join(lines)
+    for caption, value in blocks:
+        if caption:
+            lines.append(f"<i>{caption}</i>")
+        # Внутренние кавычки меняем на вложенные, иначе «текст «вот так»» читается плохо.
+        body = value.replace("«", "„").replace("»", "“")
+        lines.append(quote(f"«{body}»"))
+    return "\n".join(lines)
+
+
+def submission_files_line(sub: Submission) -> str:
+    """Что приложено и к каким шагам — чтобы фото сверху было понятно куда относить."""
+    from . import services
+
+    files = sub.files or []
+    if not files:
+        return "<i>файлов нет</i>"
+    steps = services.submission_steps(sub)
+    if not steps:
+        return f"приложено файлов: <b>{len(files)}</b>"
+    rows = []
+    for i, st in enumerate(steps):
+        if st.get("kind") == "note":
+            continue
+        n = len([f for f in files if f.get("step") == i])
+        mark = "✅" if n else "❌"
+        rows.append(f"{mark} Шаг {i + 1} · {e(st['title'])} — {n}")
+    loose = len([f for f in files if f.get("step") is None])
+    if loose:
+        rows.append(f"📎 Без шага — {loose}")
+    return "\n".join(rows)
 
 
 def _review_conditions(sub: Submission) -> str:
@@ -633,30 +677,37 @@ def _review_conditions(sub: Submission) -> str:
     body = (sub.option.conditions if sub.option else sub.task.conditions) or ""
     if not body.strip():
         return ""
-    return "📋 <b>Условия зачёта</b>\n" + quote(e(body.strip()), expandable=True)
+    return section("📋 УСЛОВИЯ ЗАЧЁТА — нажмите, чтобы раскрыть") + "\n" + quote(e(body.strip()), expandable=True)
 
 
 def _review_head(sub: Submission, with_department: bool) -> list[str]:
-    """Шапка карточки: кто, куда, за что. Четыре строки вместо шести."""
+    """Раздел «кто и за что»: одинаковый порядок строк в личке и в канале."""
     u, task = sub.user, sub.task
     who = f"👤 <b>{e(u.display_name)}</b>" + (f" (@{e(u.username)})" if u.username else "")
     if with_department and u.department:
         who += f" · {e(u.department)}"
     team = f"{e(u.team.emoji)} {e(u.team.name)}" if u.team else "без команды"
-    option = f" · «{e(sub.option.title)}»" if sub.option else ""
+    option = f"\n     опция «{e(sub.option.title)}»" if sub.option else ""
+    when = f" · отправлен {sub.submitted_at.strftime('%d.%m в %H:%M')}" if sub.submitted_at else ""
     return [
+        section("👤 КТО И ЗА ЧТО"),
         who,
-        f"👥 {team} · неделя {sub.week}",
-        f"📋 №{task.code} {e(task.title)}{option}",
-        f"⭐ <b>{sub.target_points}</b> б. · 📎 {len(sub.files or [])}"
-        + (f" · {sub.submitted_at.strftime('%d.%m %H:%M')}" if sub.submitted_at else ""),
+        f"👥 {team} · неделя {sub.week}{when}",
+        f"📋 Задание №{task.code}: <b>{e(task.title)}</b>{option}",
+        f"⭐ К начислению: <b>{sub.target_points}</b> б.",
     ]
 
 
+def _review_files(sub: Submission) -> list[str]:
+    return [section("📎 ЧТО ПРИЛОЖЕНО"), submission_files_line(sub)]
+
+
 def submission_admin_card(sub: Submission, idx: int | None = None, total: int | None = None) -> str:
-    head = f"🔎 <b>Проверка отчёта #{sub.id}</b>" + (f" · {idx} из {total}" if idx else "")
+    head = f"🔎 <b>ПРОВЕРКА ОТЧЁТА #{sub.id}</b>" + (f" · {idx} из {total} в очереди" if idx else "")
     lines = [head, ""]
     lines += _review_head(sub, with_department=True)
+    lines.append("")
+    lines += _review_files(sub)
     lines.append("")
     lines.append(participant_answers(sub))
     conditions = _review_conditions(sub)
@@ -664,7 +715,8 @@ def submission_admin_card(sub: Submission, idx: int | None = None, total: int | 
         lines.append("")
         lines.append(conditions)
     lines.append("")
-    lines.append(f"{STATUS_ICON[sub.status]} {STATUS_LABEL[sub.status]}")
+    lines.append(HR)
+    lines.append(f"{STATUS_ICON[sub.status]} <b>{STATUS_LABEL[sub.status].capitalize()}</b>")
     return "\n".join(lines)
 
 
@@ -774,8 +826,10 @@ def registration_channel_card(user: User) -> str:
 
 def submission_channel_card(sub: Submission) -> str:
     """Report card published in the results channel (media is sent right above it)."""
-    lines = [f"📤 <b>Отчёт #{sub.id}</b>", ""]
+    lines = [f"📤 <b>ОТЧЁТ #{sub.id}</b>", ""]
     lines += _review_head(sub, with_department=False)
+    lines.append("")
+    lines += _review_files(sub)
     lines.append("")
     lines.append(participant_answers(sub))
     conditions = _review_conditions(sub)
@@ -783,6 +837,7 @@ def submission_channel_card(sub: Submission) -> str:
         lines.append("")
         lines.append(conditions)
     lines.append("")
+    lines.append(HR)
     if sub.status == SubmissionStatus.pending:
         lines.append("⏳ <b>Ожидает проверки.</b> Баллы начисляются только после «Зачесть».")
     elif sub.status == SubmissionStatus.approved:

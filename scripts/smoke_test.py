@@ -48,7 +48,8 @@ def check_no_plain_emoji() -> None:
         "[\ufe0f\u200d\U0001F000-\U0001FAFF]*"
     )
     # Typography, not emoji: these are drawn as text and must stay text.
-    typography = {"→", "←", "─", "·", "—", "▸"}
+    # Символы рисования линий — не эмодзи: Telegram всегда рисует их текстом.
+    typography = {"→", "←", "─", "━", "│", "·", "—", "▸"}
     plain: dict[str, str] = {}
     sources = [p for p in glob.glob("app/**/*.py", recursive=True) if not p.endswith("emoji.py")]
     for path in sources + ["data/tasks.json"]:
@@ -532,8 +533,13 @@ async def check_review_cards() -> None:
         sub = await services.get_submission(s, sub.id)
 
         for card in (texts.submission_admin_card(sub, 1, 3), texts.submission_channel_card(sub)):
-            assert "<blockquote>" in card, "комментарий участника должен быть цитатой"
-            assert "Комментарий участника" in card
+            assert "<blockquote>" in card, "слова участника должны быть цитатой"
+            # Раздел подписан именем участника — спутать с текстом бота невозможно.
+            assert f"СЛОВА УЧАСТНИКА · {texts.e(sub.user.display_name)}" in card, card
+            # Навигация: каждый раздел отбит линией и назван.
+            for title in ("КТО И ЗА ЧТО", "ЧТО ПРИЛОЖЕНО", "СЛОВА УЧАСТНИКА", "УСЛОВИЯ ЗАЧЁТА"):
+                assert title in card, f"нет раздела {title}"
+            assert card.count(texts.HR) >= 4, "разделы должны быть отбиты линиями"
             assert "<blockquote expandable>" in card, "условия зачёта должны быть свёрнуты"
             assert len(card) <= 4096, len(card)
             # Полный текст условий больше не разворачивается в теле карточки.
@@ -543,6 +549,7 @@ async def check_review_cards() -> None:
             if answer:
                 quoted = card.split("<blockquote>")[1].split("</blockquote>")[0]
                 assert texts.e(answer) in quoted, "ответ участника вне цитаты"
+                assert quoted.startswith("«") and quoted.endswith("»"), "слова участника без кавычек"
 
         # В канале премиум-эмодзи снимаются, а цитата обязана пережить это.
         in_channel = em.strip(texts.submission_channel_card(sub))
@@ -553,12 +560,12 @@ async def check_review_cards() -> None:
         sub.note = "Сделал доброе дело в обеденный перерыв."
         await s.commit()
         card = texts.submission_admin_card(sub)
-        assert "<blockquote>Сделал доброе дело" in card, card
+        assert "<blockquote>«Сделал доброе дело" in card, card
 
         # Пустой комментарий не ломает карточку.
         sub.note = None
         await s.commit()
-        assert "нет" in texts.submission_admin_card(sub)
+        assert "участник ничего не написал" in texts.submission_admin_card(sub)
 
         for status in (SubmissionStatus.approved, SubmissionStatus.rejected):
             sub.status = status
