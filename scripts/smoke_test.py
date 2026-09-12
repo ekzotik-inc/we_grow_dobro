@@ -72,10 +72,14 @@ async def fill_steps(s, sub) -> None:
         await services.set_note(s, sub, "Готово")
         return
     for i, st in enumerate(steps):
-        if st.get("kind") == "note":
+        kind = st.get("kind", "photo")
+        if kind == "note":
             await services.save_step_answer(s, sub, i, f"Ответ на шаг {i + 1}")
         else:
-            await services.add_file(s, sub, {"type": "photo", "file_id": f"f{sub.id}-{i}", "name": None}, step=i)
+            # Тип файла должен совпадать с тем, что просит шаг, иначе сервис его не примет.
+            ftype = "document" if kind == "file" else "photo"
+            await services.add_file(s, sub, {"type": ftype, "file_id": f"f{sub.id}-{i}",
+                                             "name": "file.xlsx" if ftype == "document" else None}, step=i)
 
 
 def check_phone_parsing() -> None:
@@ -511,6 +515,78 @@ async def check_registration_resume() -> None:
         assert services.draft_step(u) == "team"
         assert await services.draft_from_user(s, u) == {"full_name": "Анна Восстановленная", "phone": "+77001234567"}
     print("registration resume ok")
+
+
+async def check_step_requirements() -> None:
+    """Шаг нельзя закрыть «не тем»: фото вместо текста, текст вместо фото, фото вместо файла.
+
+    И пока хоть один шаг не закрыт по-настоящему, отчёт не уходит на проверку.
+    """
+    async with SessionLocal() as s:
+        await services.set_week_open(s, 3, True)
+        await s.commit()
+        await services.load_open_weeks(s)
+        u = await services.get_or_create_user(s, 9191, "strict")
+        await services.register_user(s, u, "Строгий Проверкин", "IT", "Ташкент")
+        await services.approve_user(s, u, 999)
+        await s.commit()
+
+        # Задание, где есть все три вида шагов: фото, файл и текст.
+        task = next(t for t in await services.list_tasks(s, 3)
+                    if any(x.get("kind") == "file" for x in (t.steps or [])))
+        sub = await services.start_submission(s, u, task, None)
+        steps = services.submission_steps(sub)
+        photo_i = next(i for i, x in enumerate(steps) if x["kind"] == "photo")
+        file_i = next(i for i, x in enumerate(steps) if x["kind"] == "file")
+        note_i = next(i for i, x in enumerate(steps) if x["kind"] == "note")
+
+        async def refuses(coro, why: str) -> None:
+            try:
+                await coro
+                raise AssertionError(why)
+            except services.ServiceError:
+                pass
+
+        await refuses(services.save_step_answer(s, sub, photo_i, "вот фото"),
+                      "текст закрыл шаг с фотографией")
+        await refuses(services.add_file(s, sub, {"type": "photo", "file_id": "p"}, step=note_i),
+                      "фото закрыло текстовый шаг")
+        await refuses(services.add_file(s, sub, {"type": "photo", "file_id": "p"}, step=file_i),
+                      "фотография закрыла шаг, где нужен документ")
+        await refuses(services.add_file(s, sub, {"type": "video", "file_id": "v"}, step=photo_i),
+                      "видео закрыло шаг с фотографией")
+        await refuses(services.save_step_answer(s, sub, note_i, "ок"),
+                      "слишком короткий ответ засчитан")
+        await refuses(services.save_step_answer(s, sub, note_i, "   ...   "),
+                      "ответ из знаков препинания засчитан")
+
+        assert services.steps_left(sub) == list(range(len(steps))), "ни один шаг не должен закрыться"
+        await refuses(services.send_for_review(s, sub), "пустой отчёт ушёл на проверку")
+
+        # Заполняем правильно — по одному шагу, проверяя, что отправка открывается только в конце.
+        await services.add_file(s, sub, {"type": "photo", "file_id": "p"}, step=photo_i)
+        await refuses(services.send_for_review(s, sub), "отчёт ушёл с одним закрытым шагом")
+        await services.add_file(s, sub, {"type": "document", "file_id": "d", "name": "план.xlsx"}, step=file_i)
+        await refuses(services.send_for_review(s, sub), "отчёт ушёл без текстового шага")
+        await services.save_step_answer(s, sub, note_i, "Придумали утренние пятиминутки для команды.")
+        await s.commit()
+        assert not services.steps_left(sub) and not services.submission_missing(sub)
+        await services.send_for_review(s, sub)
+        await s.commit()
+        assert sub.status == SubmissionStatus.pending
+
+        # В перечне недостающего видно, что именно нужно на каждом шаге.
+        other = next(t for t in await services.list_tasks(s, 3) if t.id != task.id and not t.has_options)
+        sub2 = await services.start_submission(s, u, other, None)
+        await s.commit()
+        missing = services.submission_missing(sub2)
+        assert missing and any("нужно фото" in m or "нужен текст" in m or "нужен файл" in m for m in missing), missing
+
+        # Возвращаем состояние недель: следующие проверки считают текущей первую.
+        await services.set_week_open(s, 3, False)
+        await s.commit()
+        await services.load_open_weeks(s)
+    print("step requirements ok")
 
 
 async def check_review_cards() -> None:
@@ -984,6 +1060,7 @@ async def main() -> None:
     await check_missing_user_buttons()
     await check_report_edge_cases()
     await check_manual_results()
+    await check_step_requirements()
     await check_review_cards()
     await check_resubmission_resets()
     await check_prizes()

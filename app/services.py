@@ -561,13 +561,42 @@ def submission_steps(sub: Submission) -> list[dict]:
     return list(sub.task.steps or [])
 
 
+# Что принимается на шаге: «фото» — только фотография, «файл» — только документ.
+STEP_ACCEPTS = {
+    "photo": ("photo",),
+    "file": ("document",),
+    "note": (),
+}
+MIN_ANSWER_LEN = 3
+
+
+def step_kind(steps: list[dict], index: int) -> str:
+    return steps[index].get("kind", "photo") if 0 <= index < len(steps) else "photo"
+
+
+def answer_is_valid(text: str | None) -> bool:
+    """Ответ засчитывается, только если в нём есть буквы или цифры и он не короче трёх знаков."""
+    body = (text or "").strip()
+    if len(body) < MIN_ANSWER_LEN:
+        return False
+    return any(ch.isalnum() for ch in body)
+
+
+def file_fits_step(file: dict, kind: str) -> bool:
+    accepted = STEP_ACCEPTS.get(kind, ("photo",))
+    return bool(accepted) and file.get("type") in accepted
+
+
 def step_done(sub: Submission, index: int) -> bool:
     steps = submission_steps(sub)
     if index >= len(steps):
         return False
-    if steps[index].get("kind") == "note":
-        return bool((sub.answers or {}).get(str(index)))
-    return any(f.get("step") == index for f in (sub.files or []))
+    kind = step_kind(steps, index)
+    if kind == "note":
+        return answer_is_valid((sub.answers or {}).get(str(index)))
+    # Файл засчитывается только того типа, который просит шаг: фото вместо документа
+    # (и наоборот) условие зачёта не выполняет.
+    return any(f.get("step") == index and file_fits_step(f, kind) for f in (sub.files or []))
 
 
 def steps_left(sub: Submission) -> list[int]:
@@ -598,6 +627,11 @@ def _sync_note(sub: Submission) -> None:
 
 
 async def save_step_answer(s, sub: Submission, index: int, text: str) -> None:
+    steps = submission_steps(sub)
+    if steps and step_kind(steps, index) != "note":
+        raise ServiceError("На этом шаге нужен файл, а не текст.")
+    if not answer_is_valid(text):
+        raise ServiceError("Слишком коротко. Напишите ответ словами — хотя бы несколько символов.")
     answers = dict(sub.answers or {})
     answers[str(index)] = text.strip()[:1000]
     sub.answers = answers
@@ -718,6 +752,14 @@ async def add_file(s, sub: Submission, file: dict, step: int | None = None) -> i
     files = list(sub.files or [])
     if len(files) >= 10:
         raise ServiceError("Максимум 10 файлов в одном отчёте.")
+    steps = submission_steps(sub)
+    if step is not None and steps:
+        kind = step_kind(steps, step)
+        if kind == "note":
+            raise ServiceError("На этом шаге нужен текст сообщением, а не файл.")
+        if not file_fits_step(file, kind):
+            raise ServiceError("Нужен документ файлом, а не фотография."
+                               if kind == "file" else "Нужна фотография, а не файл или видео.")
     if step is not None:
         file = dict(file, step=step)
     files.append(file)
@@ -737,12 +779,14 @@ def submission_missing(sub: Submission) -> list[str]:
     """Чего не хватает для отправки. При пошаговой инструкции проверяем шаги поимённо."""
     steps = submission_steps(sub)
     if steps:
-        return [f"шаг {i + 1}: {steps[i]['title'].lower()}" for i in steps_left(sub)]
+        what = {"note": "нужен текст", "file": "нужен файл", "photo": "нужно фото"}
+        return [f"шаг {i + 1} ({what.get(step_kind(steps, i), 'нужно фото')}): "
+                f"{steps[i]['title'].lower()}" for i in steps_left(sub)]
     missing = []
     photos = len(sub.files or [])
     if photos < sub.required_photos:
         missing.append(f"файлов: {photos} из {sub.required_photos}")
-    if sub.task.note_required and not (sub.note or "").strip():
+    if sub.task.note_required and not answer_is_valid(sub.note):
         missing.append("заметка/описание")
     return missing
 

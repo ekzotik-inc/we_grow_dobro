@@ -244,27 +244,18 @@ async def sub_file(message: Message, state: FSMContext) -> None:
         try:
             if steps:
                 index = max(0, min(index, len(steps) - 1))
-                kind = steps[index].get("kind", "photo")
-                if kind == "note":
-                    # На текстовом шаге фото не подходит — говорим об этом и остаёмся здесь.
-                    await delete_quietly(message)
-                    await _open_editor(message, state, sub, index, "Здесь нужен текст сообщением, а не файл.")
-                    return
-                if kind == "file" and file["type"] == "photo":
-                    warning = "Лучше пришлите файлом, а не фотографией — так его смогут открыть."
+                # Проверку типа делает сервис: одно правило и для бота, и для любого
+                # другого пути — пропустить шаг «не тем» файлом невозможно.
                 await services.add_file(s, sub, file, step=index)
-                if message.caption:
-                    for i, st in enumerate(steps):
-                        if st.get("kind") == "note" and not services.step_done(sub, i):
-                            await services.save_step_answer(s, sub, i, message.caption)
-                            break
             else:
                 await services.add_file(s, sub, file)
                 if message.caption and not sub.note:
                     await services.set_note(s, sub, message.caption)
             await s.commit()
         except services.ServiceError as ex:
-            await message.reply(str(ex))
+            # Остаёмся на том же шаге и объясняем, что именно здесь нужно.
+            await delete_quietly(message)
+            await _open_editor(message, state, sub, index, str(ex))
             return
         sub = await services.get_submission(s, sub.id)
         next_index = services.first_unfinished_step(sub) if steps else None
@@ -289,18 +280,19 @@ async def sub_note(message: Message, state: FSMContext) -> None:
         index = data.get("step")
         if index is None:
             index = services.first_unfinished_step(sub)
-        if steps:
-            index = max(0, min(index, len(steps) - 1))
-            if steps[index].get("kind") != "note":
-                # Текст на шаге с фото: подсказываем, а не молчим.
-                await delete_quietly(message)
-                what = "файл" if steps[index].get("kind") == "file" else "фото"
-                await _open_editor(message, state, sub, index, f"На этом шаге нужно прислать {what}.")
-                return
-            await services.save_step_answer(s, sub, index, message.text)
-        else:
-            await services.set_note(s, sub, message.text)
-        await s.commit()
+        try:
+            if steps:
+                index = max(0, min(index, len(steps) - 1))
+                await services.save_step_answer(s, sub, index, message.text)
+            else:
+                if not services.answer_is_valid(message.text):
+                    raise services.ServiceError("Слишком коротко. Опишите словами, что сделали.")
+                await services.set_note(s, sub, message.text)
+            await s.commit()
+        except services.ServiceError as ex:
+            await delete_quietly(message)
+            await _open_editor(message, state, sub, index, str(ex))
+            return
         sub = await services.get_submission(s, sub.id)
         next_index = services.first_unfinished_step(sub) if steps else None
     await delete_quietly(message)
