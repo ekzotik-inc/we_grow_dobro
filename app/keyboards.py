@@ -123,6 +123,14 @@ def pending_kb(user: User) -> InlineKeyboardMarkup:
     return kb.as_markup()
 
 
+def push_kb(primary: str = "tasks", label: str = "📋 Задания недели") -> InlineKeyboardMarkup:
+    """Клавиатура под пушем: сразу туда, куда зовёт сообщение, и в меню."""
+    kb = InlineKeyboardBuilder()
+    kb.row(_btn(label, primary, style="primary"))
+    kb.row(_btn("🏠 Меню", "menu"), _btn("💬 Помощь", "help"))
+    return kb.as_markup()
+
+
 def back_kb(cb: str = "menu", text: str = "⬅️ В меню") -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[[_btn(text, cb)]])
 
@@ -642,6 +650,7 @@ def announce_kb() -> InlineKeyboardMarkup:
     kb = InlineKeyboardBuilder()
     kb.row(*[_btn(f"📣 Неделя {w.number}", f"adm:announce_ok:{w.number}") for w in settings.weeks])
     kb.row(_btn("💚 Мотивация недели", "adm:weekly"))
+    kb.row(_btn("💡 Инструкция дня", "adm:howto"), _btn("🎯 Личные подсказки", "adm:nudge"))
     kb.row(_btn("⬅️ Панель", "adm"))
     return kb.as_markup()
 

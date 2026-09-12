@@ -1015,6 +1015,86 @@ async def segment_users(s, code: str, arg: str | None = None) -> list[User]:
     return []
 
 
+async def nudge_for_user(s, user: User) -> tuple[str, dict] | None:
+    """Какая подсказка нужна именно этому человеку — одна, самая полезная сейчас.
+
+    Порядок важен: сначала то, что человек уже начал и бросил, потом то, что мешает
+    начать, и только потом похвала. Так пуш всегда про его следующий шаг, а не «вообще».
+    """
+    if user.status != UserStatus.registered:
+        return None
+    cw = current_week()
+    if cw is None:
+        return None
+    week = cw.number
+    days_left = max((cw.end - settings.today()).days, 0)
+    base = {"days_left": days_left, "week": week}
+
+    subs = await user_submissions(s, user.id)
+    week_subs = [x for x in subs if x.week == week]
+
+    # 1. Брошенный черновик: человек начал и остановился на середине.
+    for sub in week_subs:
+        if sub.status != SubmissionStatus.draft:
+            continue
+        steps = submission_steps(sub)
+        left = steps_left(sub)
+        started = bool(sub.files or sub.answers)
+        if steps and left and started:
+            index = left[0]
+            return "draft", {**base, "task": sub.task.title,
+                             "step_title": steps[index].get("title", f"шаг {index + 1}")}
+
+    # 2. Отклонённый отчёт, который так и не переделали.
+    for sub in week_subs:
+        if sub.status == SubmissionStatus.rejected:
+            return "rejected", {**base, "task": sub.task.title,
+                                "reason": sub.review_comment or ""}
+
+    sent = [x for x in week_subs if x.status in (SubmissionStatus.pending, SubmissionStatus.approved)]
+    tasks = await list_tasks(s, week)
+    total = len(tasks)
+
+    # 3. Ничего не сдано — подсказываем самое дешёвое (а значит, самое простое) дело.
+    if not sent:
+        if not user.team_id:
+            return "no_team", base
+        done_ids = {x.task_id for x in week_subs}
+        free = [t for t in tasks if t.id not in done_ids and task_is_open(t)]
+        if not free:
+            return None
+        easiest = min(free, key=lambda t: t.points)
+        return "zero", {**base, "easiest": easiest.title, "points": easiest.points}
+
+    # 4. Всё сдано — хвалим и не зовём никуда.
+    approved = [x for x in sent if x.status == SubmissionStatus.approved]
+    if len(sent) >= total:
+        return "all_done", {**base, "points": sum(x.points_awarded for x in approved)}
+
+    # 5. Первый отчёт ещё на проверке и других нет — объясняем, что делать дальше.
+    if len(sent) == 1 and sent[0].status == SubmissionStatus.pending and days_left > 2:
+        return "pending", {**base, "task": sent[0].task.title}
+
+    # 6. Начал и не дошёл до конца недели.
+    done_ids = {x.task_id for x in sent}
+    rest = [t for t in tasks if t.id not in done_ids]
+    return "almost", {**base, "done": len(sent), "total": total,
+                      "left_tasks": len(rest),
+                      "possible": sum(max((o.points for o in t.options), default=t.points) for t in rest)}
+
+
+async def nudge_targets(s) -> list[tuple[User, str, dict]]:
+    """Кому и какую подсказку отправить сегодня."""
+    out = []
+    for user in await list_participants(s):
+        if user.status != UserStatus.registered:
+            continue
+        picked = await nudge_for_user(s, user)
+        if picked:
+            out.append((user, picked[0], picked[1]))
+    return out
+
+
 async def task_number(s, task: Task) -> int:
     """Порядковый номер задания внутри своей недели: «Задание 1» … «Задание 4»."""
     week_tasks = [t for t in await list_tasks(s) if t.week == task.week]

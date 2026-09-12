@@ -222,6 +222,17 @@ async def main() -> None:
     await act(dp, bot, ADMIN, f"adm:team_del:{team}", f"adm:team_del_ok:{team}")
     check("команду расформировали", USER)
 
+    print("\nРАССЫЛКИ ДЛЯ АКТИВНОСТИ")
+    sent.clear()
+    await act(dp, bot, ADMIN, "adm:howto")
+    check("инструкция дня", USER)
+    sent.clear()
+    await act(dp, bot, ADMIN, "adm:nudge")
+    check("личная подсказка", USER)
+    sent.clear()
+    await act(dp, bot, ADMIN, "adm:weekly")
+    check("мотивация недели", USER)
+
     print("\nУДАЛЕНИЕ")
     sent.clear()
     await act(dp, bot, ADMIN, f"adm:del:{uid}", f"adm:del_ok:{uid}")

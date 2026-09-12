@@ -610,19 +610,21 @@ async def team_new_emoji(cq: CallbackQuery, state: FSMContext) -> None:
 
 # ---------- announcements / broadcast ----------
 
-async def send_to_users(bot, s, users, text: str, kind: str, image: str | None = None) -> int:
+async def send_to_users(bot, s, users, text: str, kind: str, image: str | None = None,
+                        markup=None) -> int:
     """Deliver a message to an explicit list of users, throttled below Telegram's limit."""
     from ..common import photo_for, remember_photo
 
     n = 0
+    buttons = markup or kb.back_kb("menu", "🏠 Меню")
     for u in users:
         try:
             photo = photo_for(image)
             if photo is not None:
-                sent = await bot.send_photo(u.tg_id, photo, caption=text, reply_markup=kb.back_kb("menu", "🏠 Меню"))
+                sent = await bot.send_photo(u.tg_id, photo, caption=text, reply_markup=buttons)
                 remember_photo(image, sent)
             else:
-                await bot.send_message(u.tg_id, text, reply_markup=kb.back_kb("menu", "🏠 Меню"))
+                await bot.send_message(u.tg_id, text, reply_markup=buttons)
             n += 1
         except Exception as ex:  # noqa: BLE001
             log.warning("broadcast to %s failed: %s", u.tg_id, ex)
@@ -632,12 +634,13 @@ async def send_to_users(bot, s, users, text: str, kind: str, image: str | None =
     return n
 
 
-async def broadcast(bot, s, text: str, kind: str, user_filter=None, image: str | None = None) -> int:
+async def broadcast(bot, s, text: str, kind: str, user_filter=None, image: str | None = None,
+                    markup=None) -> int:
     """Send to all approved participants (optionally filtered). Used by announcements and the scheduler."""
     users = [u for u in await services.list_participants(s) if u.status == UserStatus.registered]
     if user_filter:
         users = [u for u in users if user_filter(u)]
-    return await send_to_users(bot, s, users, text, kind, image)
+    return await send_to_users(bot, s, users, text, kind, image, markup)
 
 
 @router.callback_query(F.data == "adm:announce")
@@ -666,6 +669,50 @@ async def cb_weekly(cq: CallbackQuery) -> None:
         n = await broadcast(cq.bot, s, await weekly_text(s),
                             f"weekly:{settings.today().isoformat()}:manual")
     await edit(cq, f"💚 Мотивация недели отправлена {n} участникам.", kb.back_kb("adm", "🛠 Панель"))
+
+
+@router.callback_query(F.data == "adm:howto")
+async def cb_howto(cq: CallbackQuery) -> None:
+    """Ручная отправка очередной инструкции из обучающей серии."""
+    await answer_cq(cq, "Рассылаю…")
+    async with session() as s:
+        day = max((settings.today() - settings.weeks[0].start).days, 0)
+        index = day // 2
+        n = await broadcast(cq.bot, s, texts.howto(index), f"howto:{index}:manual",
+                            markup=kb.push_kb())
+    await edit(cq, f"💡 Инструкция «{texts.HOWTO[index % len(texts.HOWTO)][0]}» "
+                   f"отправлена {n} участникам.", kb.back_kb("adm", "🛠 Панель"))
+
+
+@router.callback_query(F.data == "adm:nudge")
+async def cb_nudge(cq: CallbackQuery) -> None:
+    """Личные подсказки: каждому своё сообщение по его состоянию."""
+    from ...scheduler import NUDGE_BUTTON
+
+    await answer_cq(cq, "Считаю, кому что нужно…")
+    counters: dict[str, int] = {}
+    async with session() as s:
+        targets = await services.nudge_targets(s)
+        for user, code, ctx in targets:
+            text = texts.nudge(code, ctx)
+            if not text:
+                continue
+            cb, label = NUDGE_BUTTON.get(code, ("tasks", "📋 Задания недели"))
+            sent = await send_to_users(cq.bot, s, [user], text,
+                                       f"nudge:{settings.today().isoformat()}:manual:{code}",
+                                       markup=kb.push_kb(cb, label))
+            if sent:
+                counters[code] = counters.get(code, 0) + 1
+    titles = {"draft": "брошенный отчёт", "rejected": "нужно переделать", "no_team": "без команды",
+              "zero": "ни одного дела", "almost": "сдал не всё", "all_done": "сдал всё",
+              "pending": "ждёт проверки"}
+    lines = ["🎯 <b>Личные подсказки отправлены</b>", ""]
+    if counters:
+        for code, n in sorted(counters.items(), key=lambda x: -x[1]):
+            lines.append(texts.row("•", titles.get(code, code), str(n)))
+    else:
+        lines.append("Некому: либо недели закрыты, либо все уже всё сделали.")
+    await edit(cq, "\n".join(lines), kb.back_kb("adm", "🛠 Панель"))
 
 
 @router.callback_query(F.data.regexp(r"^adm:bcast$"))

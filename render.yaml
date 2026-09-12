@@ -73,5 +73,9 @@ services:
         value: "0"
       - key: WEEKLY_HOUR       # час еженедельной мотивации
         value: "10"
+      - key: HOWTO_HOUR        # час обучающей серии «что и куда»
+        value: "12"
+      - key: NUDGE_HOUR        # час личных подсказок участникам
+        value: "16"
       - key: DB_EXPIRES_AT     # у платной базы Render срока нет — оставляем пустым
         value: ""

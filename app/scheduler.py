@@ -10,6 +10,7 @@ from apscheduler.triggers.cron import CronTrigger
 from apscheduler.triggers.interval import IntervalTrigger
 from sqlalchemy import select, text
 
+from . import keyboards as kb
 from . import services, texts
 from .bot.handlers.admin import broadcast
 from .config import settings
@@ -36,6 +37,64 @@ async def motivation_job(bot: Bot) -> None:
             return
         n = await broadcast(bot, s, texts.motivation(day // 2), kind)
     log.info("motivation sent to %s users", n)
+
+
+# Куда ведёт кнопка под каждой личной подсказкой.
+NUDGE_BUTTON = {
+    "draft": ("tasks", "📝 Дописать отчёт"),
+    "rejected": ("tasks", "🔁 Переделать"),
+    "no_team": ("help", "🌱 Подобрать команду"),
+    "zero": ("tasks", "📋 Задания недели"),
+    "almost": ("tasks", "📋 Задания недели"),
+    "all_done": ("teams", "🌱 Позвать коллег"),
+    "pending": ("tasks", "📋 Взять ещё дело"),
+}
+
+
+async def nudge_job(bot: Bot) -> None:
+    """Личная подсказка каждому участнику — по тому, где он сейчас застрял.
+
+    Один человек получает не больше одного такого сообщения в день: задача запускается
+    раз в сутки и сама выбирает для каждого ровно одну подсказку.
+    """
+    from .bot.handlers.admin import send_to_users
+
+    if not services.open_weeks():
+        return
+    async with SessionLocal() as s:
+        kind = f"nudge:{settings.today().isoformat()}"
+        if await _already_sent(s, kind):
+            return
+        targets = await services.nudge_targets(s)
+        if not targets:
+            return
+        sent = 0
+        for user, code, ctx in targets:
+            text = texts.nudge(code, ctx)
+            if not text:
+                continue
+            cb, label = NUDGE_BUTTON.get(code, ("tasks", "📋 Задания недели"))
+            sent += await send_to_users(bot, s, [user], text, f"{kind}:{code}",
+                                        markup=kb.push_kb(cb, label))
+        s.add(Broadcast(kind=kind, recipients=sent))
+        await s.commit()
+    log.info("личных подсказок отправлено: %s", sent)
+
+
+async def howto_job(bot: Bot) -> None:
+    """Обучающая серия «что и куда»: по одной короткой инструкции через день."""
+    if not services.open_weeks():
+        return
+    async with SessionLocal() as s:
+        day = (settings.today() - settings.weeks[0].start).days
+        if day < 0 or day % 2:
+            return
+        index = day // 2
+        kind = f"howto:{index}"
+        if await _already_sent(s, kind):
+            return
+        n = await broadcast(bot, s, texts.howto(index), kind, markup=kb.push_kb())
+    log.info("инструкция %s отправлена %s участникам", index, n)
 
 
 async def weekly_motivation_job(bot: Bot) -> None:
@@ -167,6 +226,8 @@ def build_scheduler(bot: Bot) -> AsyncIOScheduler:
     sch.add_job(reminder_job, CronTrigger(hour=settings.reminder_hour, minute=0), args=[bot], id="reminder")
     sch.add_job(admin_digest_job, CronTrigger(hour=18, minute=0), args=[bot], id="digest")
     sch.add_job(motivation_job, CronTrigger(hour=settings.motivation_hour, minute=0), args=[bot], id="motivation")
+    sch.add_job(howto_job, CronTrigger(hour=settings.howto_hour, minute=0), args=[bot], id="howto")
+    sch.add_job(nudge_job, CronTrigger(hour=settings.nudge_hour, minute=0), args=[bot], id="nudge")
     sch.add_job(top_digest_job, CronTrigger(hour=settings.top_hour, minute=0), args=[bot], id="top")
     sch.add_job(weekly_motivation_job, CronTrigger(day_of_week=settings.weekly_weekday,
                                                    hour=settings.weekly_hour, minute=0),

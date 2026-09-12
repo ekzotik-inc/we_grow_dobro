@@ -69,7 +69,9 @@ async def main():
     print("ФОНОВЫЕ ЗАДАЧИ")
     for name, job in (("анонс недели", sched.announce_week_job), ("напоминание", sched.reminder_job),
                       ("сводка админам", sched.admin_digest_job), ("мотивация", sched.motivation_job),
-                      ("топ участников", sched.top_digest_job), ("keepalive", sched.keepalive_job)):
+                      ("топ участников", sched.top_digest_job), ("keepalive", sched.keepalive_job),
+                      ("еженедельная мотивация", sched.weekly_motivation_job),
+                      ("инструкция дня", sched.howto_job), ("личные подсказки", sched.nudge_job)):
         try:
             await job(bot); check(True, name)
         except Exception as ex: check(False, f"{name}: {type(ex).__name__}: {ex}")

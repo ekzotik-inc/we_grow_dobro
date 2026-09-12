@@ -517,6 +517,92 @@ async def check_registration_resume() -> None:
     print("registration resume ok")
 
 
+async def check_nudges() -> None:
+    """Личная подсказка выбирается по состоянию участника и всегда зовёт к следующему шагу."""
+    from app.scheduler import NUDGE_BUTTON
+
+    async with SessionLocal() as s:
+        await services.set_week_open(s, 1, True)
+        await s.commit()
+        await services.load_open_weeks(s)
+        u = await services.get_or_create_user(s, 7373, "nudge")
+        await services.register_user(s, u, "Пуш Пушкин", "IT", "Ташкент")
+        await services.approve_user(s, u, 999)
+        await s.commit()
+
+        # Без команды — сначала зовём определиться.
+        kind, ctx = await services.nudge_for_user(s, u)
+        assert kind == "no_team", kind
+
+        team = await services.create_team(s, None, "Пушкари", "🚀")
+        await services.join_team(s, u, team.id)
+        await s.commit()
+        kind, ctx = await services.nudge_for_user(s, u)
+        assert kind == "zero" and ctx["easiest"] and ctx["points"] > 0, (kind, ctx)
+
+        tasks = [t for t in await services.list_tasks(s, 1) if not t.has_options]
+        # Начатый и брошенный отчёт важнее всего остального.
+        sub = await services.start_submission(s, u, tasks[0], None)
+        await services.add_file(s, sub, {"type": "photo", "file_id": "p"}, step=0)
+        await s.commit()
+        kind, ctx = await services.nudge_for_user(s, u)
+        assert kind == "draft" and ctx["step_title"], (kind, ctx)
+
+        await fill_steps(s, sub)
+        await services.send_for_review(s, sub)
+        await s.commit()
+        kind, ctx = await services.nudge_for_user(s, u)
+        assert kind == "pending", kind
+
+        sub = await services.get_submission(s, sub.id)
+        await services.review_submission(s, sub, False, 999, "нет вас в кадре")
+        await s.commit()
+        kind, ctx = await services.nudge_for_user(s, u)
+        assert kind == "rejected" and "кадре" in ctx["reason"], (kind, ctx)
+
+        # Переделали и сдали — дальше зовём добрать неделю.
+        sub = await services.start_submission(s, u, tasks[0], None)
+        await fill_steps(s, sub)
+        await services.send_for_review(s, sub)
+        await s.commit()
+        sub = await services.get_submission(s, sub.id)
+        await services.review_submission(s, sub, True, 999)
+        await s.commit()
+        kind, ctx = await services.nudge_for_user(s, u)
+        assert kind == "almost" and ctx["left_tasks"] >= 1 and ctx["possible"] > 0, (kind, ctx)
+
+        # Сдал все задания недели — хвалим.
+        for task in (await services.list_tasks(s, 1)):
+            existing = await services.user_submission_for_task(s, u.id, task.id)
+            if existing and existing.status in (SubmissionStatus.pending, SubmissionStatus.approved):
+                continue
+            option = task.options[0].id if task.has_options else None
+            x = await services.start_submission(s, u, task, option)
+            await fill_steps(s, x)
+            await services.send_for_review(s, x)
+        await s.commit()
+        kind, ctx = await services.nudge_for_user(s, u)
+        assert kind == "all_done", kind
+
+        # У каждой подсказки есть текст и кнопка, и текст влезает в лимит Telegram.
+        for code in NUDGE_BUTTON:
+            text = texts.nudge(code, {"days_left": 2, "task": "Задание", "step_title": "Шаг",
+                                      "reason": "нет фото", "easiest": "Дело", "points": 200,
+                                      "done": 1, "total": 4, "left_tasks": 3, "possible": 1200})
+            assert text and len(text) <= 4096, code
+        for i in range(len(texts.HOWTO)):
+            assert 60 < len(texts.howto(i)) <= 4096, i
+
+        # Сотрудники и неподтверждённые участники подсказок не получают.
+        pending = await services.get_or_create_user(s, 7474, "waiting")
+        await services.register_user(s, pending, "Ждун Ждунов", "IT", "Ташкент")
+        await s.commit()
+        assert await services.nudge_for_user(s, pending) is None
+        ids = {x[0].id for x in await services.nudge_targets(s)}
+        assert pending.id not in ids and u.id in ids
+    print("nudges ok")
+
+
 async def check_step_requirements() -> None:
     """Шаг нельзя закрыть «не тем»: фото вместо текста, текст вместо фото, фото вместо файла.
 
@@ -1060,6 +1146,7 @@ async def main() -> None:
     await check_missing_user_buttons()
     await check_report_edge_cases()
     await check_manual_results()
+    await check_nudges()
     await check_step_requirements()
     await check_review_cards()
     await check_resubmission_resets()

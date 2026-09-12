@@ -116,6 +116,9 @@ class Settings:
     # Еженедельная мотивационная рассылка всем участникам: день недели (0 — понедельник) и час.
     weekly_weekday: int = int(os.getenv("WEEKLY_WEEKDAY", "0"))
     weekly_hour: int = int(os.getenv("WEEKLY_HOUR", "10"))
+    # Личные подсказки каждому участнику по его состоянию и обучающая серия «что и куда».
+    nudge_hour: int = int(os.getenv("NUDGE_HOUR", "16"))
+    howto_hour: int = int(os.getenv("HOWTO_HOUR", "12"))
     # If set, the week is forced (useful for testing before the marathon starts). 0 = auto.
     # Public URL of this service; when set, the bot pings its own /api/health so a free host does not sleep it.
     external_url: str = os.getenv("RENDER_EXTERNAL_URL", "").strip().rstrip("/")
