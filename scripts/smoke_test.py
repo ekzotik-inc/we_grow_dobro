@@ -194,6 +194,18 @@ async def check_admin_router_blocks() -> None:
         await dp.feed_update(bot, update)
         assert not any(h.startswith("admin.") for h in seen), f"участник попал в панель: {seen}"
 
+    # Скрытые команды владельца недоступны ни участнику, ни сотруднику P&C.
+    for uid in (stranger, sorted(settings.pc_ids)[0]):
+        for text in ("/addresult", "/emojiid", "/emojifix 🚀 123"):
+            seen.clear()
+            await dp.feed_update(bot, message_update(uid, text))
+            assert not any(h.startswith("results.") for h in seen), f"{uid} попал в {text}: {seen}"
+    owner = sorted(settings.admin_ids)[0]
+    for text, expected in (("/emojiid", "results.cmd_emoji_id"), ("/emojifix", "results.cmd_emoji_fix")):
+        seen.clear()
+        await dp.feed_update(bot, message_update(owner, text))
+        assert seen == [expected], f"владельцу недоступно {text}: {seen}"
+
     for update in (callback_update(stranger, "mod:ok:1"), callback_update(stranger, "mod:rej:1")):
         seen.clear()
         await dp.feed_update(bot, update)
