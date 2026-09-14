@@ -70,6 +70,18 @@ def check_no_plain_emoji() -> None:
                      and x[:2].rstrip("\ufe0f") not in em.EXCLUDED]
     assert not plain_buttons, f"эмодзи не в начале подписи кнопки: {plain_buttons}"
 
+    # Подмена картинки премиального символа: набор присылает заказчик, и в нём бывают ошибки.
+    assert em.overrides_from("🚀=123, 🌱=456") == {"🚀": "123", "🌱": "456"}
+    assert em.overrides_from("мусор") == {}
+    before_rocket = em.CHARS.get("🚀")
+    em.override("🚀", "777")
+    assert em.CHARS["🚀"] == "777" and "🚀" not in em.EXCLUDED
+    assert em.CATALOGUE["rocket"][0] == "777", "именованный эмодзи должен подхватить замену"
+    assert '<tg-emoji emoji-id="777">🚀</tg-emoji>' in em.rich("🚀 Ракеты")
+    em.override("🚀", before_rocket or "5348324105701574477")
+    em.EXCLUDED.add("🚀")
+    assert em.rich("🚀 Ракеты") == "🚀 Ракеты", "исключённый символ остаётся обычным"
+
     sample = em.rich("📋 Задания ⚡ и 🏆 рейтинг")
     assert "<tg-emoji" in sample and _re.sub(r"<tg-emoji[^>]*>.*?</tg-emoji>", "", sample).strip() == "Задания  и  рейтинг"
     print("emoji ok: обычных эмодзи не осталось,", len(em.CHARS), "символов в наборе")

@@ -14,6 +14,7 @@ from aiogram.filters import BaseFilter, Command
 from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, Message
 
+from ... import emoji as em
 from ... import keyboards as kb
 from ... import services, texts
 from ...config import settings
@@ -38,6 +39,67 @@ class IsOwner(BaseFilter):
 
 
 router.message.filter(IsOwner())
+
+EMOJI_KEY = "emoji_overrides"
+
+
+@router.message(Command("emojiid"))
+async def cmd_emoji_id(message: Message) -> None:
+    """Узнать id премиальных эмодзи: перешлите боту сообщение с ними или пришлите их текстом."""
+    target = message.reply_to_message or message
+    entities = (target.entities or []) + (target.caption_entities or [])
+    text = target.text or target.caption or ""
+    found = [(text[e.offset:e.offset + e.length], e.custom_emoji_id)
+             for e in entities if e.type == "custom_emoji"]
+    if not found:
+        await message.answer(
+            "🎨 <b>Определение премиум-эмодзи</b>\n\n"
+            "Пришлите сообщение, где стоит нужный премиальный эмодзи (или ответьте этой "
+            "командой на такое сообщение) — я покажу его id.\n\n"
+            "Потом закрепите его за символом: <code>/emojifix 🚀 идентификатор</code>"
+        )
+        return
+    lines = ["🎨 <b>Найденные премиум-эмодзи</b>", ""]
+    for char, emoji_id in found:
+        lines.append(f"{texts.e(char)} → <code>{emoji_id}</code>")
+    lines.append("")
+    lines.append("Закрепить: <code>/emojifix " + texts.e(found[0][0]) + " " + found[0][1] + "</code>")
+    await message.answer("\n".join(lines))
+
+
+@router.message(Command("emojifix"))
+async def cmd_emoji_fix(message: Message) -> None:
+    """Заменить картинку премиального символа: набор заказчика бывает с ошибками."""
+    parts = (message.text or "").split()
+    if len(parts) < 3 or not parts[2].isdigit():
+        async with session() as s:
+            saved = await services.get_setting(s, EMOJI_KEY)
+        current = em.overrides_from(saved)
+        lines = ["🎨 <b>Замена премиум-эмодзи</b>", "",
+                 "Формат: <code>/emojifix 🚀 5348324105701574477</code>",
+                 "Id можно узнать командой /emojiid.", ""]
+        lines.append("Сейчас заменено: " + (", ".join(f"{c} → {i}" for c, i in current.items())
+                                            if current else "ничего"))
+        lines.append("Сбросить одну замену: <code>/emojifix 🚀 0</code>")
+        await message.answer("\n".join(lines))
+        return
+    char, emoji_id = parts[1].rstrip("\ufe0f"), parts[2]
+    async with session() as s:
+        current = em.overrides_from(await services.get_setting(s, EMOJI_KEY))
+        if emoji_id == "0":
+            current.pop(char, None)
+        else:
+            current[char] = emoji_id
+        await services.set_setting(s, EMOJI_KEY, ",".join(f"{c}={i}" for c, i in current.items()))
+        await s.commit()
+    if emoji_id == "0":
+        em.EXCLUDED.add(char)
+        await message.answer(f"✅ Замена для {char} снята — символ снова обычный. "
+                             "Полностью вернуть набор поможет перезапуск сервиса.")
+        return
+    em.override(char, emoji_id)
+    await message.answer(f"✅ Готово: {char} → {em.e_char(char)}\n\n"
+                         "Замена сохранена и применится после перезапуска сама.")
 router.callback_query.filter(IsOwner())
 
 

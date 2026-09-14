@@ -18,7 +18,7 @@ from aiogram.types import (
     MenuButtonCommands,
 )
 
-from . import services
+from . import emoji, services
 from .bot.handlers import setup_routers
 from .bot.middlewares import db_retry, premium_emoji_guard
 from .config import settings
@@ -68,7 +68,12 @@ async def run() -> None:
     async with SessionLocal() as s:
         open_weeks = await services.load_open_weeks(s)
         demoted = await services.sync_staff_flags(s)
+        # Исправленные владельцем картинки премиум-эмодзи: набор присылает заказчик,
+        # и в нём попадаются символы, нарисованные не тем.
+        fixed = emoji.apply_overrides(await services.get_setting(s, "emoji_overrides"))
         await s.commit()
+    if fixed:
+        log.info("заменено премиум-эмодзи: %s", fixed)
     if demoted:
         log.info("права приведены к спискам ADMIN_IDS/PC_IDS: изменено пользователей — %s", demoted)
     log.info("открытые недели: %s", open_weeks or "ни одной — участники видят «задания скоро»")

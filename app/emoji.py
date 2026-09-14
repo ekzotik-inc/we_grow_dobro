@@ -87,6 +87,12 @@ def e(name: str) -> str:
     return f'<tg-emoji emoji-id="{emoji_id}">{fallback}</tg-emoji>'
 
 
+def e_char(char: str) -> str:
+    """Отрисовать конкретный символ премиально — для подтверждений в панели."""
+    emoji_id = _canon(char)
+    return f'<tg-emoji emoji-id="{emoji_id}">{char}</tg-emoji>' if emoji_id and enabled() else char
+
+
 def strip(text: str) -> str:
     """Replace every <tg-emoji> tag with its plain character — the retry path when Telegram
     refuses custom emoji, and the way channel cards are rendered."""
@@ -121,8 +127,47 @@ SUBSTITUTES: dict[str, str] = {
 
 
 # Символы, у которых премиальная версия из набора заказчика не похожа на оригинал:
-# 🚀 в наборе выглядит как семечко. Такие показываем обычными — лучше обычный, но верный.
+# в присланном наборе 🚀 нарисован семечком. Пока правильный id не задан, такой символ
+# показывается обычным — лучше обычный, но верный по смыслу.
 EXCLUDED: set[str] = {"🚀"}
+
+
+def override(char: str, emoji_id: str) -> None:
+    """Заменить id премиального символа на правильный, без перевыпуска кода.
+
+    Набор присылает заказчик, и в нём попадаются ошибки: символ один, а картинка другая.
+    Владелец бота присылает верный эмодзи, бот берёт его id — и подмена применяется сразу.
+    """
+    char = char.rstrip("\ufe0f")
+    if not emoji_id.isdigit():
+        return
+    CHARS[char] = emoji_id
+    CHARS[char + "\ufe0f"] = emoji_id
+    EXCLUDED.discard(char)
+    for name, (_, fallback) in list(CATALOGUE.items()):
+        if fallback.rstrip("\ufe0f") == char:
+            CATALOGUE[name] = (emoji_id, fallback)
+    # Набор символов мог пополниться — перестраиваем шаблон поиска.
+    global _CHARS_RE
+    _CHARS_RE = _emoji_pattern()
+
+
+def overrides_from(raw: str | None) -> dict[str, str]:
+    """Разобрать сохранённые подмены вида «🚀=123,🌱=456»."""
+    out: dict[str, str] = {}
+    for part in (raw or "").split(","):
+        char, _, value = part.partition("=")
+        char, value = char.strip(), value.strip()
+        if char and value.isdigit():
+            out[char] = value
+    return out
+
+
+def apply_overrides(raw: str | None) -> int:
+    pairs = overrides_from(raw)
+    for char, emoji_id in pairs.items():
+        override(char, emoji_id)
+    return len(pairs)
 
 
 def _canon(char: str) -> str | None:
