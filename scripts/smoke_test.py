@@ -58,6 +58,15 @@ def check_no_plain_emoji() -> None:
                 plain.setdefault(found, path)
     assert not plain, f"эмодзи без премиум-версии: {plain}"
 
+    # Иконка кнопки берётся только из ПЕРВОГО символа подписи. Если эмодзи стоит в конце
+    # («Дальше ➡️») или подпись — один эмодзи, премиум-версия не подставится и рядом с
+    # премиальными кнопками появится обычная.
+    keyboards_src = Path("app/keyboards.py").read_text(encoding="utf-8")
+    labels = set(_re.findall(r'_btn\(\s*f?"([^"]+)"', keyboards_src))
+    labels |= set(_re.findall(r'InlineKeyboardButton\(text="([^"]+)"', keyboards_src))
+    plain_buttons = [x for x in labels if em._CHARS_RE.findall(x) and em.button_icon(x)[0] is None]
+    assert not plain_buttons, f"эмодзи не в начале подписи кнопки: {plain_buttons}"
+
     sample = em.rich("📋 Задания ⚡ и 🏆 рейтинг")
     assert "<tg-emoji" in sample and _re.sub(r"<tg-emoji[^>]*>.*?</tg-emoji>", "", sample).strip() == "Задания  и  рейтинг"
     print("emoji ok: обычных эмодзи не осталось,", len(em.CHARS), "символов в наборе")

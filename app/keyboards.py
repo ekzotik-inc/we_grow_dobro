@@ -130,7 +130,7 @@ def gallery_kb(index: int, total: int, week: int | None) -> InlineKeyboardMarkup
     if index > 1:
         nav.append(_btn("⬅️ Раньше", f"gal:i:{index - 1}:{week or 0}"))
     if index < total:
-        nav.append(_btn("Дальше ➡️", f"gal:i:{index + 1}:{week or 0}"))
+        nav.append(_btn("➡️ Дальше", f"gal:i:{index + 1}:{week or 0}"))
     if nav:
         kb.row(*nav)
     weeks = [_btn(("• " if week == w.number else "") + f"Неделя {w.number}", f"gal:w:{w.number}")
@@ -321,9 +321,9 @@ def results_users_kb(users: list[User], points: dict[int, int], page: int = 0, p
         kb.row(_btn(f"{u.display_name[:28]} · {points.get(u.id, 0)} б.", f"res:user:{u.id}"))
     nav = []
     if page > 0:
-        nav.append(_btn("⬅️", f"res:users:{page - 1}"))
+        nav.append(_btn("⬅️ Назад", f"res:users:{page - 1}"))
     if (page + 1) * per < len(users):
-        nav.append(_btn("➡️", f"res:users:{page + 1}"))
+        nav.append(_btn("➡️ Вперёд", f"res:users:{page + 1}"))
     if nav:
         kb.row(*nav)
     kb.row(_btn("🔍 Найти участника", "res:find"))
@@ -439,9 +439,9 @@ def applications_kb(users: list[User], page: int, per_page: int = 8) -> InlineKe
         kb.row(_btn(f"🙋 {u.display_name[:28]}" + (f" · {u.department[:14]}" if u.department else ""), f"mod:card:{u.id}"))
     nav = []
     if page > 0:
-        nav.append(_btn("⬅️", f"adm:apps:{page - 1}"))
+        nav.append(_btn("⬅️ Назад", f"adm:apps:{page - 1}"))
     if (page + 1) * per_page < len(users):
-        nav.append(_btn("➡️", f"adm:apps:{page + 1}"))
+        nav.append(_btn("➡️ Вперёд", f"adm:apps:{page + 1}"))
     if nav:
         kb.row(*nav)
     kb.row(_btn("🛠 Панель", "adm"))
@@ -536,9 +536,9 @@ def review_kb(sub: Submission, idx: int, total: int) -> InlineKeyboardMarkup:
     kb.row(_btn(f"✅ Зачесть +{sub.target_points}", f"adm:ok:{sub.id}"), _btn("❌ Отклонить", f"adm:rej:{sub.id}"))
     nav = []
     if idx > 1:
-        nav.append(_btn("⬅️", f"adm:queue:{idx - 2}"))
+        nav.append(_btn("⬅️ Пред.", f"adm:queue:{idx - 2}"))
     if idx < total:
-        nav.append(_btn("➡️", f"adm:queue:{idx}"))
+        nav.append(_btn("➡️ След.", f"adm:queue:{idx}"))
     if nav:
         kb.row(*nav)
     kb.row(_btn("👤 Участник", f"adm:user:{sub.user_id}"), _btn("🛠 Панель", "adm"))
@@ -597,9 +597,9 @@ def users_list_kb(users: list[User], page: int, per_page: int = 8, flt: str = "a
         kb.row(_btn(f"{st}{u.display_name[:28]}{team}", f"adm:user:{u.id}"))
     nav = []
     if page > 0:
-        nav.append(_btn("⬅️", f"adm:users:{page - 1}:{flt}"))
+        nav.append(_btn("⬅️ Назад", f"adm:users:{page - 1}:{flt}"))
     if (page + 1) * per_page < len(users):
-        nav.append(_btn("➡️", f"adm:users:{page + 1}:{flt}"))
+        nav.append(_btn("➡️ Вперёд", f"adm:users:{page + 1}:{flt}"))
     if nav:
         kb.row(*nav)
     kb.row(_btn("🔍 Поиск участника", "adm:user_search"))
