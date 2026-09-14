@@ -82,7 +82,7 @@ def e(name: str) -> str:
     if name not in CATALOGUE:
         return ""
     emoji_id, fallback = CATALOGUE[name]
-    if not enabled():
+    if not enabled() or fallback.rstrip("\ufe0f") in EXCLUDED:
         return fallback
     return f'<tg-emoji emoji-id="{emoji_id}">{fallback}</tg-emoji>'
 
@@ -120,8 +120,15 @@ SUBSTITUTES: dict[str, str] = {
 }
 
 
+# Символы, у которых премиальная версия из набора заказчика не похожа на оригинал:
+# 🚀 в наборе выглядит как семечко. Такие показываем обычными — лучше обычный, но верный.
+EXCLUDED: set[str] = {"🚀"}
+
+
 def _canon(char: str) -> str | None:
     """The id for a character, tolerating a missing or extra variation selector."""
+    if char.rstrip("\ufe0f") in EXCLUDED:
+        return None
     for variant in (char, char.rstrip("\ufe0f"), char + "\ufe0f"):
         if variant in CHARS:
             return CHARS[variant]

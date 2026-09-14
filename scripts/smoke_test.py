@@ -54,7 +54,9 @@ def check_no_plain_emoji() -> None:
     sources = [p for p in glob.glob("app/**/*.py", recursive=True) if not p.endswith("emoji.py")]
     for path in sources + ["data/tasks.json"]:
         for found in pattern.findall(Path(path).read_text(encoding="utf-8")):
-            if found.strip() and found not in typography and em._canon(found) is None:
+            if (found.strip() and found not in typography
+                    and found.rstrip("\ufe0f") not in em.EXCLUDED
+                    and em._canon(found) is None):
                 plain.setdefault(found, path)
     assert not plain, f"эмодзи без премиум-версии: {plain}"
 
@@ -64,7 +66,8 @@ def check_no_plain_emoji() -> None:
     keyboards_src = Path("app/keyboards.py").read_text(encoding="utf-8")
     labels = set(_re.findall(r'_btn\(\s*f?"([^"]+)"', keyboards_src))
     labels |= set(_re.findall(r'InlineKeyboardButton\(text="([^"]+)"', keyboards_src))
-    plain_buttons = [x for x in labels if em._CHARS_RE.findall(x) and em.button_icon(x)[0] is None]
+    plain_buttons = [x for x in labels if em._CHARS_RE.findall(x) and em.button_icon(x)[0] is None
+                     and x[:2].rstrip("\ufe0f") not in em.EXCLUDED]
     assert not plain_buttons, f"эмодзи не в начале подписи кнопки: {plain_buttons}"
 
     sample = em.rich("📋 Задания ⚡ и 🏆 рейтинг")
