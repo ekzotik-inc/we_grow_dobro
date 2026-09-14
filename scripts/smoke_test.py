@@ -78,9 +78,11 @@ def check_no_plain_emoji() -> None:
     assert em.CHARS["🚀"] == "777" and "🚀" not in em.EXCLUDED
     assert em.CATALOGUE["rocket"][0] == "777", "именованный эмодзи должен подхватить замену"
     assert '<tg-emoji emoji-id="777">🚀</tg-emoji>' in em.rich("🚀 Ракеты")
-    em.override("🚀", before_rocket or "5348324105701574477")
     em.EXCLUDED.add("🚀")
     assert em.rich("🚀 Ракеты") == "🚀 Ракеты", "исключённый символ остаётся обычным"
+    em.EXCLUDED.discard("🚀")
+    em.override("🚀", before_rocket)
+    assert em.CATALOGUE["rocket"][0] == before_rocket, "исходный id должен вернуться"
 
     sample = em.rich("📋 Задания ⚡ и 🏆 рейтинг")
     assert "<tg-emoji" in sample and _re.sub(r"<tg-emoji[^>]*>.*?</tg-emoji>", "", sample).strip() == "Задания  и  рейтинг"
