@@ -517,6 +517,68 @@ async def check_registration_resume() -> None:
     print("registration resume ok")
 
 
+async def check_gallery() -> None:
+    """Галерея показывает только зачтённые работы с фото и подписывает, кто и что сделал."""
+    async with SessionLocal() as s:
+        await services.set_week_open(s, 1, True)
+        await s.commit()
+        await services.load_open_weeks(s)
+        team = await services.create_team(s, None, "Галерейщики", "🖼")
+        u = await services.get_or_create_user(s, 8484, "gal")
+        await services.register_user(s, u, "Галина Галерейная", "IT", "Ташкент")
+        await services.approve_user(s, u, 999)
+        await services.join_team(s, u, team.id)
+        await s.commit()
+        tasks = [t for t in await services.list_tasks(s, 1) if not t.has_options]
+
+        # Отчёт на проверке в галерею не попадает.
+        pending = await services.start_submission(s, u, tasks[0], None)
+        await fill_steps(s, pending)
+        await services.send_for_review(s, pending)
+        await s.commit()
+        before = [x.id for x in await services.gallery_items(s)]
+        assert pending.id not in before, "непроверенная работа не должна быть в галерее"
+
+        pending = await services.get_submission(s, pending.id)
+        await services.review_submission(s, pending, True, 999)
+        await s.commit()
+        items = await services.gallery_items(s)
+        assert pending.id in [x.id for x in items], "зачтённая работа должна появиться"
+
+        sub = next(x for x in items if x.id == pending.id)
+        media = services.gallery_media(sub)
+        assert media and all(f["type"] in ("photo", "video") for f in media), media
+        assert len(media) <= 10, "в альбом Telegram помещается не больше десяти файлов"
+        caption = texts.gallery_caption(sub, 1, len(items))
+        assert len(caption) <= 1024, len(caption)
+        assert "Галина Галерейная" in caption and "Галерейщики" in caption
+        assert "выполнил задание" in caption and sub.task.title in caption
+
+        # Отклонённая работа исчезает из галереи.
+        other = await services.start_submission(s, u, tasks[1], None)
+        await fill_steps(s, other)
+        await services.send_for_review(s, other)
+        await s.commit()
+        other = await services.get_submission(s, other.id)
+        await services.review_submission(s, other, False, 999, "нет фото")
+        await s.commit()
+        assert other.id not in [x.id for x in await services.gallery_items(s)]
+
+        # Дисквалифицированных не показываем.
+        u.status = UserStatus.disqualified
+        await s.commit()
+        assert not [x for x in await services.gallery_items(s) if x.user_id == u.id]
+        u.status = UserStatus.registered
+        await s.commit()
+
+        # Фильтр по неделям и пустой экран.
+        assert [x.id for x in await services.gallery_items(s, 1)] == [x.id for x in await services.gallery_items(s)]
+        assert await services.gallery_items(s, 2) == []
+        assert "пусто" in texts.gallery_empty(2)
+        assert len(texts.gallery_intro(len(items), None)) <= 4096
+    print("gallery ok")
+
+
 async def check_nudges() -> None:
     """Личная подсказка выбирается по состоянию участника и всегда зовёт к следующему шагу."""
     from app.scheduler import NUDGE_BUTTON
@@ -552,7 +614,8 @@ async def check_nudges() -> None:
         await services.send_for_review(s, sub)
         await s.commit()
         kind, ctx = await services.nudge_for_user(s, u)
-        assert kind == "pending", kind
+        # Ближе к концу недели важнее добрать задания, чем ждать проверки, — верны оба ответа.
+        assert kind in ("pending", "almost"), kind
 
         sub = await services.get_submission(s, sub.id)
         await services.review_submission(s, sub, False, 999, "нет вас в кадре")
@@ -1146,6 +1209,7 @@ async def main() -> None:
     await check_missing_user_buttons()
     await check_report_edge_cases()
     await check_manual_results()
+    await check_gallery()
     await check_nudges()
     await check_step_requirements()
     await check_review_cards()

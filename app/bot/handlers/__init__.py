@@ -1,6 +1,6 @@
 from aiogram import Router
 
-from . import admin, moderation, results, start, tasks, teams
+from . import admin, gallery, moderation, results, start, tasks, teams
 
 
 def setup_routers() -> Router:
@@ -12,6 +12,7 @@ def setup_routers() -> Router:
     root.include_router(moderation.router)
     root.include_router(start.router)
     root.include_router(teams.router)
+    root.include_router(gallery.router)
     root.include_router(tasks.router)
     # Последним: отвечает на всё, что не подошло другим обработчикам, — бот никогда не молчит.
     root.include_router(start.fallback_router)

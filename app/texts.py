@@ -895,6 +895,52 @@ def db_expiry_warning() -> str | None:
     )
 
 
+# ---------- галерея ----------
+
+def gallery_caption(sub: Submission, index: int, total: int) -> str:
+    """Подпись под карусель фотографий. Лимит подписи — 1024 символа, держимся коротко."""
+    u = sub.user
+    team = f" из команды {e(u.team.emoji)} {e(u.team.name)}" if u.team else ""
+    when = f" · {_date_ru(sub.reviewed_at.date())}" if sub.reviewed_at else ""
+    lines = [
+        f"🖼 <b>{e(u.display_name)}</b>{team}",
+        f"выполнил задание «{e(sub.task.title)}»"
+        + (f" · опция «{e(sub.option.title)}»" if sub.option else "")
+        + " и поделился фото.",
+        "",
+        row("⭐", "Получено", f"{sub.points_awarded} б.", f"неделя {sub.week}{when}"),
+    ]
+    note = (sub.note or "").strip()
+    if note:
+        lines.append("")
+        lines.append(quote(f"«{e(note[:300])}»"))
+    lines.append("")
+    lines.append(f"<i>{index} из {total} в галерее</i>")
+    return "\n".join(lines)
+
+
+def gallery_empty(week: int | None) -> str:
+    where = f" за неделю {week}" if week else ""
+    return (
+        f"🖼 <b>Галерея добрых дел</b>\n\n"
+        f"Пока здесь пусто{where}: сюда попадают отчёты, которые уже зачёл сотрудник P&amp;C.\n\n"
+        + voice("Хочешь оказаться тут первым? Загляни в «Задания недели» — "
+                "твоё фото увидят коллеги.")
+    )
+
+
+def gallery_intro(total: int, week: int | None) -> str:
+    where = f"неделя {week}" if week else "все недели"
+    return (
+        f"🖼 <b>Галерея добрых дел</b>\n"
+        f"<i>{where} · {total} {plural(total, 'работа', 'работы', 'работ')}</i>\n\n"
+        "Здесь видно, как задания выполнили коллеги. Листайте фотографии прямо в сообщении, "
+        "а кнопками ниже — переходите между работами.\n\n"
+        + voice("Подсматривать тут можно и нужно: чужой отчёт — лучший ответ на вопрос "
+                "«а как это вообще сделать».")
+    )
+
+
 # ---------- призы ----------
 
 _PRIZES: dict | None = None

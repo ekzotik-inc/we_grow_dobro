@@ -1015,6 +1015,33 @@ async def segment_users(s, code: str, arg: str | None = None) -> list[User]:
     return []
 
 
+# ---------- галерея ----------
+
+async def gallery_items(s, week: int | None = None) -> list[Submission]:
+    """Зачтённые отчёты с фотографиями — то, что можно показать коллегам.
+
+    Только принятые сотрудником P&C: в галерею не должно попасть ничего, что ещё не
+    проверил человек. Свежие впереди.
+    """
+    query = _sub_query().where(Submission.status == SubmissionStatus.approved)
+    if week:
+        query = query.where(Submission.week == week)
+    subs = list((await s.execute(query.order_by(Submission.reviewed_at.desc(),
+                                                Submission.id.desc()))).scalars())
+    out = []
+    for sub in subs:
+        if sub.user.status == UserStatus.disqualified:
+            continue
+        if any(f.get("type") in ("photo", "video") for f in (sub.files or [])):
+            out.append(sub)
+    return out
+
+
+def gallery_media(sub: Submission) -> list[dict]:
+    """Только фотографии и видео: документы в карусель не ставим."""
+    return [f for f in (sub.files or []) if f.get("type") in ("photo", "video")][:10]
+
+
 async def nudge_for_user(s, user: User) -> tuple[str, dict] | None:
     """Какая подсказка нужна именно этому человеку — одна, самая полезная сейчас.
 
