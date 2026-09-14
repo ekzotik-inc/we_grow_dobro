@@ -527,7 +527,16 @@ async def cb_move(cq: CallbackQuery) -> None:
             await answer_cq(cq, "Участник не найден — возможно, его удалили.", alert=True)
             return
         teams = await services.list_teams(s)
-    await edit(cq, f"🔀 Перевести <b>{texts.e(u.display_name)}</b> в команду:", kb.move_team_kb(u, teams))
+        points = await services.user_points(s, u.id)
+        now = f"{u.team.emoji} {u.team.name}" if u.team else "без команды"
+    text = (
+        f"🔀 <b>Перевести участника</b>\n"
+        f"<i>{texts.e(u.display_name)} · сейчас: {texts.e(now)}</i>\n\n"
+        + texts.row("⭐", "Баллов у участника", texts.num(points)) + "\n\n"
+        "Все его баллы уедут вместе с ним: командный зачёт считается по текущей команде.\n"
+        "Выберите, куда перевести:"
+    )
+    await edit(cq, text, kb.move_team_kb(u, teams))
     await answer_cq(cq)
 
 
@@ -547,6 +556,7 @@ async def cb_move_to(cq: CallbackQuery) -> None:
             await answer_cq(cq, str(ex), alert=True)
             return
         u = await services.get_user_by_id(s, int(uid))
+        moved_points = await services.user_points(s, u.id)
         text = await _user_card(s, u)
     try:
         if u.team:
@@ -555,7 +565,9 @@ async def cb_move_to(cq: CallbackQuery) -> None:
             await cq.bot.send_message(u.tg_id, texts.push_team_removed(), reply_markup=kb.back_kb("menu", "🏠 Меню"))
     except Exception:  # noqa: BLE001
         pass
-    await edit(cq, "✅ Готово.\n\n" + text, kb.admin_user_kb(u))
+    where = f"{u.team.emoji} {u.team.name}" if u.team else "без команды"
+    moved = f" · перенесено {texts.num(moved_points)} б." if u.team and moved_points else ""
+    await edit(cq, f"✅ <b>Готово: {texts.e(where)}</b>{moved}\n\n" + text, kb.admin_user_kb(u))
     await answer_cq(cq)
 
 

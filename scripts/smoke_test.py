@@ -526,6 +526,105 @@ async def check_registration_resume() -> None:
     print("registration resume ok")
 
 
+async def check_team_moves() -> None:
+    """Перевод из команды в команду: состав, баллы, капитан, лимит и «убрать из команды»."""
+    async with SessionLocal() as s:
+        a = await services.create_team(s, None, "Альфа", "🅰️")
+        b = await services.create_team(s, None, "Бета", "🅱️")
+        await s.commit()
+
+        people = []
+        for i in range(3):
+            u = await services.get_or_create_user(s, 9300 + i, f"mover{i}")
+            await services.register_user(s, u, f"Ходок {i} Команднов", "IT", "Ташкент")
+            await services.approve_user(s, u, 999)
+            await services.join_team(s, u, a.id)
+            people.append(u)
+        await s.commit()
+        a = await services.get_team(s, a.id)
+        a.captain_id = people[0].id
+        await s.commit()
+
+        # Заработанные баллы переезжают вместе с участником: зачёт идёт по текущей команде.
+        await services.set_week_open(s, 1, True)
+        await s.commit()
+        await services.load_open_weeks(s)
+        task = next(t for t in await services.list_tasks(s, 1) if not t.has_options)
+        sub = await services.start_submission(s, people[0], task, None)
+        await fill_steps(s, sub)
+        await services.send_for_review(s, sub)
+        await s.commit()
+        sub = await services.get_submission(s, sub.id)
+        await services.review_submission(s, sub, True, 999)
+        await s.commit()
+        earned = sub.points_awarded
+        pts = await services.team_points_map(s)
+        assert pts.get(a.id) == earned and pts.get(b.id, 0) == 0, pts
+
+        await services.move_user_to_team(s, people[0], b.id)
+        await s.commit()
+        assert people[0].team_id == b.id
+        pts = await services.team_points_map(s)
+        assert pts.get(b.id) == earned, "баллы должны уехать вместе с участником"
+        assert pts.get(a.id, 0) == 0, "в старой команде его баллы остаться не должны"
+
+        # Составы обеих команд пересчитаны.
+        assert len(services.team_active_members(await services.get_team(s, a.id))) == 2
+        assert len(services.team_active_members(await services.get_team(s, b.id))) == 1
+        # Личные баллы участника не меняются от переезда.
+        assert await services.user_points(s, people[0].id) == earned
+
+        # Ушёл капитан — корона переходит оставшемуся, а не висит в пустоте.
+        a = await services.get_team(s, a.id)
+        assert a.captain_id in [m.id for m in services.team_active_members(a)], a.captain_id
+
+        # Перевод в ту же команду ничего не ломает.
+        await services.move_user_to_team(s, people[0], b.id)
+        await s.commit()
+        assert people[0].team_id == b.id
+
+        # Заполненную команду бот не переполняет.
+        filler = []
+        while len(services.team_active_members(await services.get_team(s, b.id))) < settings.team_size:
+            i = 9400 + len(filler)
+            u = await services.get_or_create_user(s, i, f"filler{i}")
+            await services.register_user(s, u, f"Заполнитель {i}", "IT", "Ташкент")
+            await services.approve_user(s, u, 999)
+            await services.move_user_to_team(s, u, b.id)
+            await s.commit()
+            filler.append(u)
+        try:
+            await services.move_user_to_team(s, people[1], b.id)
+            raise AssertionError("перевод в заполненную команду прошёл")
+        except services.ServiceError:
+            pass
+        assert people[1].team_id == a.id, "неудачный перевод не должен менять команду"
+
+        # «Убрать из команды» и возврат обратно.
+        await services.move_user_to_team(s, people[1], None)
+        await s.commit()
+        assert people[1].team_id is None
+        assert await services.user_points(s, people[1].id) == 0
+        await services.move_user_to_team(s, people[1], a.id)
+        await s.commit()
+        assert people[1].team_id == a.id
+
+        # Дисквалифицированный не занимает место и не приносит команде баллы.
+        before = await services.team_active_count(s, a.id)
+        people[2].status = UserStatus.disqualified
+        await s.commit()
+        assert await services.team_active_count(s, a.id) == before - 1
+        assert (await services.team_points_map(s)).get(a.id, 0) == 0
+
+        # Отчёты участника переезд не трогает.
+        assert len(await services.user_submissions(s, people[0].id)) == 1
+
+        await services.set_week_open(s, 1, False)
+        await s.commit()
+        await services.load_open_weeks(s)
+    print("team moves ok")
+
+
 async def check_gallery() -> None:
     """Галерея показывает только зачтённые работы с фото и подписывает, кто и что сделал."""
     async with SessionLocal() as s:
@@ -1218,6 +1317,7 @@ async def main() -> None:
     await check_missing_user_buttons()
     await check_report_edge_cases()
     await check_manual_results()
+    await check_team_moves()
     await check_gallery()
     await check_nudges()
     await check_step_requirements()

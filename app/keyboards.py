@@ -634,8 +634,15 @@ def move_team_kb(u: User, teams: list[Team]) -> InlineKeyboardMarkup:
     kb = InlineKeyboardBuilder()
     for t in teams:
         n = len([m for m in t.members if m.status.value != "disqualified"])
-        mark = "✔️ " if u.team_id == t.id else ""
-        kb.row(_btn(f"{mark}{t.emoji} {t.name} ({n}/{settings.team_size})", f"adm:move_to:{u.id}:{t.id}"))
+        if u.team_id == t.id:
+            mark, tail = "✔️ ", " · сейчас здесь"
+        elif n >= settings.team_size:
+            # Кнопку оставляем: бот всё равно откажет и объяснит, почему.
+            mark, tail = "", " · мест нет"
+        else:
+            mark, tail = "", ""
+        kb.row(_btn(f"{mark}{t.emoji} {t.name} ({n}/{settings.team_size}){tail}",
+                    f"adm:move_to:{u.id}:{t.id}"))
     kb.row(_btn("➖ Убрать из команды", f"adm:move_to:{u.id}:0"))
     kb.row(_btn("⬅️ Назад", f"adm:user:{u.id}"))
     return kb.as_markup()

@@ -384,12 +384,25 @@ async def reinstate(s, user: User, actor_tg_id: int) -> None:
 
 # ---------- teams ----------
 
+def _team_query():
+    """populate_existing: после перевода участника состав команды обязан перечитаться.
+
+    Без него SQLAlchemy отдаёт объект из кэша сессии вместе со старой коллекцией
+    участников — и панель показывает человека в команде, из которой его уже перевели.
+    """
+    return (
+        select(Team)
+        .options(selectinload(Team.members))
+        .execution_options(populate_existing=True)
+    )
+
+
 async def list_teams(s) -> list[Team]:
-    return list((await s.execute(select(Team).options(selectinload(Team.members)).order_by(Team.name))).scalars())
+    return list((await s.execute(_team_query().order_by(Team.name))).scalars())
 
 
 async def get_team(s, team_id: int) -> Team | None:
-    return (await s.execute(select(Team).options(selectinload(Team.members)).where(Team.id == team_id))).scalar_one_or_none()
+    return (await s.execute(_team_query().where(Team.id == team_id))).scalar_one_or_none()
 
 
 def team_active_members(team: Team) -> list[User]:
@@ -465,14 +478,34 @@ async def leave_team(s, user: User) -> None:
 
 
 async def move_user_to_team(s, user: User, team_id: int | None) -> None:
-    """P&C manual assignment (bypasses lock, respects team size)."""
+    """Ручное распределение сотрудником P&C: игнорирует запрет на самостоятельную смену,
+    но соблюдает размер команды и приводит в порядок команду, которую человек покидает.
+
+    Баллы участника считаются по его текущей команде, поэтому вместе с ним в новую
+    команду переезжает и всё, что он успел заработать.
+    """
     if team_id is not None:
         team = await get_team(s, team_id)
         if team is None:
             raise ServiceError("Команда не найдена.")
         if user.team_id != team_id and await team_active_count(s, team_id) >= settings.team_size:
             raise ServiceError("Команда заполнена.")
+    old_team_id = user.team_id
+    if old_team_id == team_id:
+        return
     user.team_id = team_id
+    await s.flush()
+    if old_team_id:
+        await _hand_over_captain(s, old_team_id, user.id)
+
+
+async def _hand_over_captain(s, team_id: int, left_user_id: int) -> None:
+    """Ушёл капитан — корона переходит оставшемуся, иначе она висит за чужим человеком."""
+    team = await get_team(s, team_id)
+    if team is None or team.captain_id != left_user_id:
+        return
+    rest = [m for m in team_active_members(team) if m.id != left_user_id]
+    team.captain_id = rest[0].id if rest else None
     await s.flush()
 
 
