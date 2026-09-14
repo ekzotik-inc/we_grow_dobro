@@ -163,6 +163,27 @@ def overrides_from(raw: str | None) -> dict[str, str]:
     return out
 
 
+def drop(emoji_id: str) -> int:
+    """Убрать идентификатор, который Telegram не отдаёт боту: символ станет обычным."""
+    removed = 0
+    for char, value in list(CHARS.items()):
+        if value == emoji_id:
+            del CHARS[char]
+            EXCLUDED.add(char.rstrip("\ufe0f"))
+            removed += 1
+    for name, (value, fallback) in list(CATALOGUE.items()):
+        if value == emoji_id:
+            EXCLUDED.add(fallback.rstrip("\ufe0f"))
+    return removed
+
+
+def used_ids() -> list[str]:
+    """Идентификаторы, которые бот действительно может подставить в сообщение."""
+    ids = {value for value in CHARS.values()}
+    ids |= {value for value, _ in CATALOGUE.values()}
+    return sorted(ids)
+
+
 def apply_overrides(raw: str | None) -> int:
     pairs = overrides_from(raw)
     for char, emoji_id in pairs.items():

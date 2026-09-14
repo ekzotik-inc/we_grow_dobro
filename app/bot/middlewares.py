@@ -16,8 +16,11 @@ from .. import emoji
 
 log = logging.getLogger(__name__)
 
-# Substrings Telegram uses when it refuses a custom emoji entity.
-_EMOJI_ERRORS = ("custom emoji", "custom_emoji", "emoji is not allowed", "EMOJI_INVALID")
+# Подстроки, которыми Telegram отказывает в кастомном эмодзи. Список намеренно широкий:
+# один недоступный идентификатор не должен ломать сообщение целиком, а формулировки
+# отличаются для текста («entity») и для иконки кнопки («icon»).
+_EMOJI_ERRORS = ("custom emoji", "custom_emoji", "emoji is not allowed", "EMOJI_INVALID",
+                 "emoji", "icon", "entity")
 
 _TEXT_FIELDS = ("text", "caption")
 
@@ -78,9 +81,17 @@ async def premium_emoji_guard(make_request, bot, method):
         message = str(ex)
         if not (_has_custom_emoji(method) and any(m.lower() in message.lower() for m in _EMOJI_ERRORS)):
             raise
+        log.warning("Telegram отклонил премиум-эмодзи (%s) — отправляю обычными", message)
         emoji.disable(f"Telegram отклонил премиум-эмодзи: {message}")
         _strip_custom_emoji(method)
-        return await make_request(bot, method)
+        try:
+            return await make_request(bot, method)
+        except TelegramBadRequest as second:
+            # Повтор уже без кастомных эмодзи. Если он тоже упал, дело не в них —
+            # пишем в лог обе причины, иначе разбираться придётся вслепую.
+            log.error("сообщение не ушло и без премиум-эмодзи: %s (первая ошибка: %s)",
+                      second, message)
+            raise
 
 
 # ---------- устойчивость к засыпающей базе ----------

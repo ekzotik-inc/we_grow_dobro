@@ -60,6 +60,34 @@ async def setup_bot_ui(bot: Bot) -> None:
     await bot.set_chat_menu_button(menu_button=MenuButtonCommands())
 
 
+async def verify_emoji(bot: Bot) -> None:
+    """Проверить, какие премиум-эмодзи Telegram вообще отдаёт этому боту.
+
+    Набор присылает заказчик, и в нём попадаются идентификаторы, недоступные боту.
+    Один такой символ ломает каждое сообщение, где он встретился, — поэтому спрашиваем
+    Telegram заранее и всё, чего он не знает, показываем обычным.
+    """
+    if not emoji.enabled():
+        return
+    ids = emoji.used_ids()
+    known: set[str] = set()
+    for start in range(0, len(ids), 200):  # ограничение метода — 200 идентификаторов за раз
+        batch = ids[start : start + 200]
+        try:
+            stickers = await bot.get_custom_emoji_stickers(custom_emoji_ids=batch)
+        except Exception as ex:  # noqa: BLE001
+            log.warning("не удалось проверить премиум-эмодзи: %s", ex)
+            return
+        known.update(x.custom_emoji_id for x in stickers if x.custom_emoji_id)
+    missing = [x for x in ids if x not in known]
+    for emoji_id in missing:
+        emoji.drop(emoji_id)
+    if missing:
+        log.warning("недоступных премиум-эмодзи: %s — показываю их обычными", len(missing))
+    else:
+        log.info("премиум-эмодзи проверены: доступны все %s", len(ids))
+
+
 async def run() -> None:
     if not settings.bot_token:
         log.error("BOT_TOKEN не задан. Впишите токен от @BotFather в файл .env (см. .env.example).")
@@ -79,6 +107,7 @@ async def run() -> None:
     log.info("открытые недели: %s", open_weeks or "ни одной — участники видят «задания скоро»")
 
     bot = Bot(settings.bot_token, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
+    await verify_emoji(bot)
     bot.session.middleware(premium_emoji_guard)
     dp = Dispatcher(storage=MemoryStorage())
     # База на бесплатном тарифе засыпает: первое действие после паузы повторяем, а не теряем.

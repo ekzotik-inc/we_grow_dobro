@@ -84,6 +84,15 @@ def check_no_plain_emoji() -> None:
     em.override("🚀", before_rocket)
     assert em.CATALOGUE["rocket"][0] == before_rocket, "исходный id должен вернуться"
 
+    # Недоступный боту идентификатор не должен ломать сообщение: символ становится обычным.
+    cup_id = em.CHARS.get("🏆")
+    assert em.drop(cup_id) >= 1
+    assert em.rich("🏆 Рейтинг") == "🏆 Рейтинг", "снятый символ обязан стать обычным"
+    em.EXCLUDED.discard("🏆")
+    em.override("🏆", cup_id)
+    assert "<tg-emoji" in em.rich("🏆 Рейтинг")
+    assert len(em.used_ids()) > 900, "проверять на старте нужно весь набор"
+
     sample = em.rich("📋 Задания ⚡ и 🏆 рейтинг")
     assert "<tg-emoji" in sample and _re.sub(r"<tg-emoji[^>]*>.*?</tg-emoji>", "", sample).strip() == "Задания  и  рейтинг"
     print("emoji ok: обычных эмодзи не осталось,", len(em.CHARS), "символов в наборе")
