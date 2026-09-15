@@ -663,6 +663,46 @@ async def check_team_moves() -> None:
     print("team moves ok")
 
 
+async def check_tops() -> None:
+    """Два зачёта: команды и ТОП-10 участников. Своё место видно всегда."""
+    async with SessionLocal() as s:
+        people = await services.top_participants(s, limit=0)
+        assert all({"id", "name", "team", "points"} <= set(x) for x in people), people[:1]
+        assert people == sorted(people, key=lambda r: (-r["points"], r["name"].lower()))
+        assert all(x["points"] > 0 for x in people), "без баллов в личном зачёте делать нечего"
+        assert len(await services.top_participants(s, limit=10)) <= 10
+
+        # Дисквалифицированных в личном зачёте нет.
+        if people:
+            victim = await services.get_user_by_id(s, people[0]["id"])
+            victim.status = UserStatus.disqualified
+            await s.commit()
+            assert people[0]["id"] not in [x["id"] for x in await services.top_participants(s, limit=0)]
+            victim.status = UserStatus.registered
+            await s.commit()
+
+        big = [{"id": i, "name": f"Участник {i}", "team": "🔥 Команда", "points": 2000 - i * 100}
+               for i in range(1, 15)]
+        # В десятке: видно себя и разрыв до соседа сверху.
+        screen = texts.top_people_text(big, 5, len(big))
+        assert screen.count("←") == 1 and "ТОП-10" in screen
+        assert len([x for x in screen.splitlines() if x.startswith(("🥇", "🥈", "🥉", "#"))]) == 10
+        # Ниже десятки: своя строка добавляется отдельно, после многоточия.
+        screen = texts.top_people_text(big, 13, len(big))
+        assert "…" in screen and "#13" in screen and "До десятки" in screen
+        # Не в списке вовсе и пустой зачёт.
+        assert "Тебя тут ещё нет" in texts.top_people_text(big, 999, len(big))
+        assert "Пока ни у кого нет баллов" in texts.top_people_text([], 1, 0)
+        for uid in (1, 13, 999):
+            assert len(texts.top_people_text(big, uid, len(big))) <= 4096
+
+        rows = await services.leaderboard(s)
+        digest = texts.top_digest(rows, big)
+        assert "ТОП-10 команд" in digest and "ТОП-10 участников" in digest
+        assert len(digest) <= 4096
+    print("tops ok")
+
+
 async def check_gallery() -> None:
     """Галерея показывает только зачтённые работы с фото и подписывает, кто и что сделал."""
     async with SessionLocal() as s:
@@ -1356,6 +1396,7 @@ async def main() -> None:
     await check_report_edge_cases()
     await check_manual_results()
     await check_team_moves()
+    await check_tops()
     await check_gallery()
     await check_nudges()
     await check_step_requirements()

@@ -56,9 +56,20 @@ async def cb_teams(cq: CallbackQuery, state: FSMContext) -> None:
 
 @router.callback_query(F.data == "top")
 async def cb_top(cq: CallbackQuery) -> None:
+    """Командный зачёт. Личный — на соседней вкладке."""
     async with session() as s:
         rows = await services.leaderboard(s)
-    await edit(cq, texts.leaderboard_text(rows), kb.back_kb())
+    await edit(cq, texts.leaderboard_text(rows), kb.top_kb("teams"))
+    await answer_cq(cq)
+
+
+@router.callback_query(F.data == "top:people")
+async def cb_top_people(cq: CallbackQuery) -> None:
+    """ТОП-10 участников: своё место видно, даже если оно ниже десятого."""
+    async with session() as s:
+        user = await load_user(s, cq.from_user)
+        everyone = await services.top_participants(s, limit=0)
+    await edit(cq, texts.top_people_text(everyone, user.id, len(everyone)), kb.top_kb("people"))
     await answer_cq(cq)
 
 

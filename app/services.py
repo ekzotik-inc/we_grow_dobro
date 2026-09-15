@@ -1181,8 +1181,12 @@ async def participant_rank(s, user_id: int) -> tuple[int | None, int]:
     return place, len(scores)
 
 
-async def top_participants(s, limit: int = 5) -> list[tuple[str, str, int]]:
-    """Strongest participants: (name, team, points). Disqualified people are left out."""
+async def top_participants(s, limit: int = 10) -> list[dict]:
+    """Личный зачёт: кто набрал больше всех. Дисквалифицированные не участвуют.
+
+    Возвращаем и id участника — по нему экран отмечает строку «это ты» и показывает
+    место человека, даже если он не попал в десятку.
+    """
     points = await user_points_map(s)
     rows = []
     for u in await list_participants(s):
@@ -1190,6 +1194,11 @@ async def top_participants(s, limit: int = 5) -> list[tuple[str, str, int]]:
             continue
         pts = points.get(u.id, 0)
         if pts:
-            rows.append((u.display_name, f"{u.team.emoji} {u.team.name}" if u.team else "без команды", pts))
-    rows.sort(key=lambda r: -r[2])
-    return rows[:limit]
+            rows.append({
+                "id": u.id,
+                "name": u.display_name,
+                "team": f"{u.team.emoji} {u.team.name}" if u.team else "без команды",
+                "points": pts,
+            })
+    rows.sort(key=lambda r: (-r["points"], r["name"].lower()))
+    return rows[:limit] if limit else rows

@@ -328,6 +328,49 @@ def team_card(team: Team, members: list[User], points: int, rank: int | None, us
     return "\n".join(lines)
 
 
+MEDALS = ("🥇", "🥈", "🥉")
+
+
+def place(index: int) -> str:
+    """Отметка места: медаль за первые три, номер дальше."""
+    return MEDALS[index] if index < len(MEDALS) else f"#{index + 1}"
+
+
+def top_people_text(people: list[dict], me_id: int | None, total: int) -> str:
+    """Личный зачёт: ТОП-10 участников и своё место, даже если оно ниже десятого."""
+    lines = ["⭐ <b>ТОП-10 участников</b>", f"<i>личный зачёт · участников с баллами: {total}</i>", ""]
+    if not people:
+        lines.append("Пока ни у кого нет баллов — первое зачтённое дело сразу поставит тебя наверх.")
+        lines.append("")
+        lines.append(voice("Займи первую строчку, пока её никто не занял."))
+        return "\n".join(lines)
+
+    my_index = next((i for i, x in enumerate(people) if x["id"] == me_id), None)
+    for i, row in enumerate(people[:10]):
+        you = " ← ты" if row["id"] == me_id else ""
+        lines.append(f"{place(i)} <b>{e(row['name'])}</b> · {e(row['team'])} — "
+                     f"<b>{num(row['points'])}</b> б.{you}")
+    if my_index is not None and my_index >= 10:
+        lines.append("…")
+        me = people[my_index]
+        lines.append(f"{place(my_index)} <b>{e(me['name'])}</b> · {e(me['team'])} — "
+                     f"<b>{num(me['points'])}</b> б. ← ты")
+    lines.append("")
+    if my_index is None:
+        lines.append(voice("Тебя тут ещё нет — нужно одно зачтённое дело. "
+                           "Загляни в «Задания недели»."))
+    elif my_index == 0:
+        lines.append(voice("Первое место. Держись — десятка получает личные консультации."))
+    elif my_index < 10:
+        gap = people[my_index - 1]["points"] - people[my_index]["points"]
+        ahead = f"До соседа сверху {num(gap)} б. — это одно дело." if gap else "Идёте вровень."
+        lines.append(voice(f"Ты в десятке. {ahead}"))
+    else:
+        gap = people[9]["points"] - people[my_index]["points"]
+        lines.append(voice(f"До десятки {num(gap)} б. Пара дел — и ты там."))
+    return "\n".join(lines)
+
+
 def leaderboard_text(rows: list[dict]) -> str:
     lines = ["🏆 <b>Рейтинг команд</b>", ""]
     medals = [px("medal"), "🥈", "🥉"]
@@ -1232,19 +1275,18 @@ def push_reinstated() -> str:
     )
 
 
-def top_digest(rows: list[dict], people: list[tuple[str, str, int]]) -> str:
-    """Periodic standings: teams first, then the strongest participants."""
-    medals = ["🥇", "🥈", "🥉"]
-    lines = [f"{px('medal')} <b>Как идут дела</b>", "", "<b>Команды</b>"]
-    for i, r in enumerate(rows[:5]):
-        mark = medals[i] if i < 3 else f"{i + 1}."
-        lines.append(f"{mark} {e(r['team'].emoji)} {e(r['team'].name)} — {r['points']} б.")
+def top_digest(rows: list[dict], people: list[dict]) -> str:
+    """Периодический дайджест: две таблицы — команды и личный зачёт."""
+    lines = [f"{px('medal')} <b>Как идут дела</b>", "", rule("🏆 ТОП-10 команд")]
+    for i, r in enumerate(rows[:10]):
+        lines.append(f"{place(i)} {e(r['team'].emoji)} {e(r['team'].name)} — "
+                     f"<b>{num(r['points'])}</b> б.")
     if people:
         lines.append("")
-        lines.append("<b>Участники</b>")
-        for i, (name, team, pts) in enumerate(people[:5]):
-            mark = medals[i] if i < 3 else f"{i + 1}."
-            lines.append(f"{mark} {e(name)} · {e(team)} — {pts} б.")
+        lines.append(rule("⭐ ТОП-10 участников"))
+        for i, row in enumerate(people[:10]):
+            lines.append(f"{place(i)} {e(row['name'])} · {e(row['team'])} — "
+                         f"<b>{num(row['points'])}</b> б.")
     lines.append("")
     lines.append(voice("Одно дело меняет расклад. Загляни в задания недели."))
     return "\n".join(lines)

@@ -142,6 +142,19 @@ def gallery_kb(index: int, total: int, week: int | None) -> InlineKeyboardMarkup
     return kb.as_markup()
 
 
+def top_kb(active: str = "teams") -> InlineKeyboardMarkup:
+    """Две таблицы рядом: командный зачёт и личный. Активная отмечена точкой."""
+    kb = InlineKeyboardBuilder()
+    kb.row(
+        _btn(("• " if active == "teams" else "") + "🏆 Команды", "top"),
+        _btn(("• " if active == "people" else "") + "⭐ Участники", "top:people"),
+    )
+    kb.row(_btn("🎁 Призы", "prizes"), _btn("🖼 Галерея", "gal"))
+    kb.row(_btn("📋 Задания недели", "tasks", style="primary"))
+    kb.row(_btn("🏠 Меню", "menu"))
+    return kb.as_markup()
+
+
 def push_kb(primary: str = "tasks", label: str = "📋 Задания недели") -> InlineKeyboardMarkup:
     """Клавиатура под пушем: сразу туда, куда зовёт сообщение, и в меню."""
     kb = InlineKeyboardBuilder()
