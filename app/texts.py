@@ -590,10 +590,27 @@ def submission_review(sub: Submission) -> str:
 
     steps = services.submission_steps(sub)
     answers = sub.answers or {}
-    lines = ["<b>Отчёт готов</b>", f"{e(sub.task.emoji)} <b>{e(sub.task.title)}</b>"]
+    missing = services.steps_left(sub)
+    ready = not missing
+
+    if ready:
+        # Последний экран не должен выглядеть как ещё один пройденный шаг: своя шапка,
+        # линии и явное указание на единственную оставшуюся кнопку.
+        head = [HR, "🚀 <b>ВСЁ ГОТОВО К ОТПРАВКЕ</b>",
+                f"{e(sub.task.emoji)} <b>{e(sub.task.title)}</b>"]
+    else:
+        head = ["📝 <b>Отчёт собирается</b>", f"{e(sub.task.emoji)} <b>{e(sub.task.title)}</b>"]
+    lines = list(head)
     if sub.option:
         lines.append(f"<i>вариант: {e(sub.option.title)} — {sub.option.points} б.</i>")
+    if ready:
+        files = len(sub.files or [])
+        lines.append(f"<i>{len(steps)} {plural(len(steps), 'шаг', 'шага', 'шагов')} · "
+                     f"{files} {plural(files, 'файл', 'файла', 'файлов')} · "
+                     f"к начислению {sub.target_points} б.</i>")
+        lines.append(HR)
     lines.append("")
+
     for i, st in enumerate(steps):
         ok = services.step_done(sub, i)
         lines.append(f"{'✅' if ok else '⏳'} <b>Шаг {i + 1}. {e(st['title'])}</b>")
@@ -604,13 +621,16 @@ def submission_review(sub: Submission) -> str:
             lines.append(f"<i>{'приложено: ' + str(n) if n else 'пока пусто'}</i>")
         lines.append("")
 
-    missing = services.steps_left(sub)
     if missing:
         nums = ", ".join(str(i + 1) for i in missing)
         lines.append(voice(f"Не хватает шагов: {nums}. Нажми на нужный шаг ниже и дошли, чего не хватает."))
     else:
-        lines.append(voice(f"Всё на месте. Жми «Отправить на проверку» — дальше смотрит P&amp;C {plain('rocket')}\n"
-                           "Если что-то захочешь переснять, шаг можно открыть заново."))
+        lines.append(HR)
+        lines.append("👇 <b>Нажми зелёную кнопку «ОТПРАВИТЬ НА ПРОВЕРКУ»</b>")
+        lines.append("<i>без неё отчёт останется черновиком и баллы не придут</i>")
+        lines.append("")
+        lines.append(voice(f"Дальше смотрит сотрудник P&amp;C, а я сообщу результат {plain('rocket')}\n"
+                           "Хочешь что-то переснять — открой нужный шаг кнопкой ниже."))
     return "\n".join(lines)
 
 

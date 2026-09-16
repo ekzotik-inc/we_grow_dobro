@@ -298,12 +298,21 @@ def submission_step_kb(sub: Submission, index: int, total: int, done: bool) -> I
 
 
 def submission_review_kb(sub: Submission, steps: list[dict], done: list[bool], ready: bool) -> InlineKeyboardMarkup:
+    """Итоговый экран мастера.
+
+    Главное действие должно бросаться в глаза. Поэтому кнопка отправки — единственная
+    зелёная (стиль success) и стоит одна в своём ряду, а кнопки шагов намеренно не
+    начинаются с ✅: иначе они красятся тем же цветом и сливаются с ней.
+    """
     kb = InlineKeyboardBuilder()
     if ready:
-        kb.row(_btn("✅ Отправить на проверку", f"sub:send:{sub.id}"))
+        kb.row(_btn("🚀 ОТПРАВИТЬ НА ПРОВЕРКУ", f"sub:send:{sub.id}", style="success"))
     for i, st in enumerate(steps):
-        mark = "✅" if done[i] else "⏳"
-        kb.row(_btn(f"{mark} Шаг {i + 1}. {st['title'][:28]}", f"sub:step:{sub.id}:{i}"))
+        if done[i]:
+            label, style = f"✏️ Шаг {i + 1}. {st['title'][:26]} · переснять", None
+        else:
+            label, style = f"⏳ Шаг {i + 1}. {st['title'][:26]} · нужно сделать", "primary"
+        kb.row(_btn(label, f"sub:step:{sub.id}:{i}", style=style))
     if sub.files:
         kb.row(_btn("👁 Показать файлы", f"sub:preview:{sub.id}"))
     kb.row(_btn("❌ Отменить отчёт", f"sub:cancel:{sub.id}"), _btn("⬅️ К заданию", f"task:{sub.task_id}"))

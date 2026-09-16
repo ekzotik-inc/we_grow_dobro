@@ -924,6 +924,37 @@ async def check_step_requirements() -> None:
     print("step requirements ok")
 
 
+def check_ready_screen() -> None:
+    """Экран «всё готово» обязан отличаться от пройденных шагов: свой заголовок и одна зелёная кнопка."""
+    import app.keyboards as kbs
+
+    class FakeStep(dict):
+        pass
+
+    steps = [{"kind": "photo", "title": "Фото"}, {"kind": "note", "title": "Описание"}]
+    markup = kbs.submission_review_kb(
+        type("S", (), {"id": 1, "task_id": 2, "files": [{"type": "photo"}]})(),
+        steps, [True, True], ready=True,
+    )
+    flat = [b for row in markup.inline_keyboard for b in row]
+    green = [b for b in flat if b.style == "success"]
+    assert len(green) == 1, "зелёной должна быть только кнопка отправки"
+    assert "ОТПРАВИТЬ" in green[0].text.upper(), green[0].text
+    assert markup.inline_keyboard[0] == [green[0]], "кнопка отправки стоит одна в первом ряду"
+    # Кнопки пройденных шагов не должны краситься как отправка.
+    step_buttons = [b for b in flat if "Шаг" in b.text]
+    assert step_buttons and all(b.style is None for b in step_buttons), \
+        "шаги не должны повторять цвет главной кнопки"
+    assert all("переснять" in b.text for b in step_buttons)
+
+    not_ready = kbs.submission_review_kb(
+        type("S", (), {"id": 1, "task_id": 2, "files": []})(), steps, [True, False], ready=False)
+    flat = [b for row in not_ready.inline_keyboard for b in row]
+    assert not any("ОТПРАВИТЬ" in b.text.upper() for b in flat), "пока не готово — отправки нет"
+    assert any(b.style == "primary" for b in flat), "незакрытый шаг подсвечен как следующее действие"
+    print("ready screen ok")
+
+
 async def check_review_cards() -> None:
     """Карточка проверки: ответ участника — цитатой, условия — свёрнуты, всё компактно."""
     from app import emoji as em
@@ -1400,6 +1431,7 @@ async def main() -> None:
     await check_gallery()
     await check_nudges()
     await check_step_requirements()
+    check_ready_screen()
     await check_review_cards()
     await check_resubmission_resets()
     await check_prizes()

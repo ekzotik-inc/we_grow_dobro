@@ -135,6 +135,16 @@ async def _open_editor(cq_or_msg, state: FSMContext, sub, index: int | None = No
     key = str(index) if steps and index is not None and index < len(steps) else "review"
 
     known = step_msgs.get(key)
+    if known and key == "review":
+        # Итоговый экран, ставший готовым к отправке, отправляем заново — иначе он остаётся
+        # выше присланных шагов, и участник просто не видит кнопку отправки.
+        ready = steps and not services.steps_left(sub)
+        if ready and not data.get("review_ready"):
+            with contextlib.suppress(Exception):
+                await bot.delete_message(chat_id, known)
+            step_msgs.pop(key, None)
+            known = None
+        await state.update_data(review_ready=bool(ready))
     if known:
         with contextlib.suppress(Exception):
             await bot.edit_message_text(text, chat_id=chat_id, message_id=known, reply_markup=markup)
