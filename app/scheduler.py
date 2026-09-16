@@ -81,6 +81,79 @@ async def nudge_job(bot: Bot) -> None:
     log.info("личных подсказок отправлено: %s", sent)
 
 
+async def last_call_job(bot: Bot, force: bool = False) -> int:
+    """Вечер последнего дня недели: у каждого своя причина поторопиться.
+
+    force — ручной запуск из панели: тогда отправляем и в другой день, и повторно.
+    """
+    from .bot.handlers.admin import send_to_users
+
+    cw = services.current_week()
+    if not cw or (not force and settings.today() != cw.end):
+        return 0
+    deadline = "%02d:%02d" % settings.close_at
+    async with SessionLocal() as s:
+        kind = f"lastcall:{cw.number}" + (f":manual:{settings.now():%Y-%m-%d %H:%M}" if force else "")
+        if not force and await _already_sent(s, kind):
+            return 0
+        report = await services.stuck_report(s, cw.number)
+        tasks = await services.list_tasks(s, cw.number)
+        by_id = {t.id: t for t in tasks}
+        sent = 0
+        for user in await services.list_participants(s):
+            if user.status.value != "registered":
+                continue
+            subs = [x for x in await services.user_submissions(s, user.id) if x.week == cw.number]
+            draft = next((x for x in subs if x.status.value == "draft" and (x.files or x.answers)), None)
+            done_ids = {x.task_id for x in subs
+                        if x.status.value in ("pending", "approved")}
+            rest = [t for t in by_id.values() if t.id not in done_ids]
+            possible = sum(max((o.points for o in t.options), default=t.points) for t in rest)
+            text = texts.last_call(cw.number, deadline, len(rest), possible,
+                                   draft.task.title if draft else None)
+            sent += await send_to_users(bot, s, [user], text, f"{kind}:{user.id}",
+                                        markup=kb.push_kb("tasks", "📋 Успеть сегодня"))
+        s.add(Broadcast(kind=kind, recipients=sent))
+        await s.commit()
+    log.info("«последний рывок» недели %s отправлен %s участникам (застряли: %s)",
+             cw.number, sent, len(report["drafts"]))
+    return sent
+
+
+async def close_week_job(bot: Bot) -> None:
+    """Закрыть неделю в её последний день: после этого отчёты не принимаются."""
+    if not settings.auto_weeks:
+        return
+    week = settings.week_by_end(settings.today())
+    if week is None or not services.week_is_open(week.number):
+        return
+    nxt = settings.week(week.number + 1)
+    async with SessionLocal() as s:
+        kind = f"week_closed:{week.number}"
+        if await _already_sent(s, kind):
+            return
+        await services.set_week_open(s, week.number, False)
+        await s.commit()
+        n = await broadcast(bot, s, texts.week_closed(week.number, nxt.number if nxt else None,
+                                                      "%02d:%02d" % settings.open_at), kind,
+                            markup=kb.push_kb("top", "🏆 Посмотреть рейтинг"))
+    log.info("неделя %s закрыта автоматически, уведомлено %s участников", week.number, n)
+
+
+async def open_week_job(bot: Bot) -> None:
+    """Открыть неделю в день её старта и сразу разослать анонс заданий."""
+    if not settings.auto_weeks:
+        return
+    week = settings.week_by_start(settings.today())
+    if week is None or services.week_is_open(week.number):
+        return
+    async with SessionLocal() as s:
+        await services.set_week_open(s, week.number, True)
+        await s.commit()
+    log.info("неделя %s открыта автоматически", week.number)
+    await announce_week_job(bot)
+
+
 async def howto_job(bot: Bot) -> None:
     """Обучающая серия «что и куда»: по одной короткой инструкции через день."""
     if not services.open_weeks():
@@ -227,6 +300,13 @@ def build_scheduler(bot: Bot) -> AsyncIOScheduler:
     sch.add_job(admin_digest_job, CronTrigger(hour=18, minute=0), args=[bot], id="digest")
     sch.add_job(motivation_job, CronTrigger(hour=settings.motivation_hour, minute=0), args=[bot], id="motivation")
     sch.add_job(howto_job, CronTrigger(hour=settings.howto_hour, minute=0), args=[bot], id="howto")
+    close_h, close_m = settings.close_at
+    open_h, open_m = settings.open_at
+    sch.add_job(last_call_job, CronTrigger(hour=settings.last_call_hour, minute=0), args=[bot], id="lastcall")
+    sch.add_job(close_week_job, CronTrigger(hour=close_h, minute=close_m), args=[bot], id="week_close")
+    sch.add_job(open_week_job, CronTrigger(hour=open_h, minute=open_m), args=[bot], id="week_open")
+    log.info("смена недель: %s — закрытие, %s — открытие, автоматически: %s",
+             settings.week_close_time, settings.week_open_time, "да" if settings.auto_weeks else "нет")
     sch.add_job(nudge_job, CronTrigger(hour=settings.nudge_hour, minute=0), args=[bot], id="nudge")
     sch.add_job(top_digest_job, CronTrigger(hour=settings.top_hour, minute=0), args=[bot], id="top")
     sch.add_job(weekly_motivation_job, CronTrigger(day_of_week=settings.weekly_weekday,

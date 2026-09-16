@@ -958,6 +958,82 @@ def db_expiry_warning() -> str | None:
     )
 
 
+# ---------- финал недели ----------
+
+def last_call(week: int, deadline: str, left_tasks: int, possible: int, in_draft: str | None) -> str:
+    """«Последний рывок»: у участника ещё есть вечер, чтобы вырваться вперёд."""
+    lines = [f"{px('bolt')} <b>Последний рывок!</b>",
+             f"<i>неделя {week} закрывается сегодня в {deadline}</i>", ""]
+    if in_draft:
+        lines.append(f"У тебя остался незаконченный отчёт: «{e(in_draft)}».")
+        lines.append("Дошли, что просят, и жми зелёную кнопку — иначе он останется черновиком.")
+    elif left_tasks:
+        lines.append(f"Не сдано {left_tasks} {plural(left_tasks, 'задание', 'задания', 'заданий')} — "
+                     f"это ещё <b>{num(possible)}</b> {plural(possible, 'балл', 'балла', 'баллов')} "
+                     "тебе и команде.")
+        lines.append("Есть дела на десять минут: поблагодарить коллегу или поделиться материалом.")
+    else:
+        lines.append("Ты закрыл всю неделю — красавчик. Если есть силы на ещё одно доброе дело, "
+                     "самое время.")
+    lines.append("")
+    lines.append(f"<b>Приём отчётов — до {deadline} сегодня.</b> После этого неделя закроется, "
+                 "и задания уже не примутся.")
+    lines.append("")
+    lines.append(voice("Сегодняшний вечер решает, кто окажется выше в таблице. "
+                       f"Один отчёт — и ты можешь вырваться вперёд {plain('rocket')}"))
+    return "\n".join(lines)
+
+
+def week_closed(week: int, next_week: int | None, open_time: str) -> str:
+    lines = [f"{px('salute')} <b>Неделя {week} закрыта</b>", ""]
+    lines.append("Приём отчётов за эту неделю окончен — всё, что успели отправить, "
+                 "проверит сотрудник P&amp;C.")
+    if next_week:
+        lines.append(f"Задания недели {next_week} откроются сегодня в {open_time}.")
+    lines.append("")
+    lines.append(voice("Итоги видно в «Рейтинге»: и командный зачёт, и личный."
+                       + (" А завтра — новые дела." if next_week else "")))
+    return "\n".join(lines)
+
+
+def stuck_screen(report: dict) -> str:
+    """Экран для P&C: кто застрял и на каком шаге."""
+    week = report.get("week") or 0
+    lines = [f"🔍 <b>Кто ещё не сдал · неделя {week}</b>", ""]
+    if not week:
+        lines.append("Ни одна неделя не открыта.")
+        return "\n".join(lines)
+
+    counts = [("незаконченные отчёты", len(report["drafts"])),
+              ("не зачтено и не переделано", len(report["rejected"])),
+              ("не начинали", len(report["idle"])),
+              ("сдали часть", len(report["pending"])),
+              ("закрыли неделю", len(report["done"]))]
+    for label, n in counts:
+        lines.append(row("•", label, str(n)))
+
+    if report["drafts"]:
+        lines.append("")
+        lines.append(section("📝 ЗАСТРЯЛИ НА ШАГЕ"))
+        for x in report["drafts"][:15]:
+            lines.append(f"• <b>{e(x['user'].display_name)}</b> · {e(x['team'])}\n"
+                         f"  «{e(x['task'])}» — шаг {x['step']} из {x['steps']}: {e(x['title'])}")
+    if report["rejected"]:
+        lines.append("")
+        lines.append(section("🔁 НЕ ПЕРЕДЕЛАЛИ ПОСЛЕ ОТКАЗА"))
+        for x in report["rejected"][:15]:
+            lines.append(f"• <b>{e(x['user'].display_name)}</b> · {e(x['team'])} — «{e(x['task'])}»")
+    if report["idle"]:
+        lines.append("")
+        lines.append(section("💤 НИ ОДНОГО ОТЧЁТА"))
+        names = ", ".join(e(x["user"].display_name) for x in report["idle"][:30])
+        lines.append(names)
+    lines.append("")
+    lines.append(voice("Кнопкой ниже я напишу каждому из них лично — с подсказкой, "
+                       "что именно осталось сделать."))
+    return "\n".join(lines)
+
+
 # ---------- галерея ----------
 
 def gallery_caption(sub: Submission, index: int, total: int) -> str:

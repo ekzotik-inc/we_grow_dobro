@@ -663,6 +663,82 @@ async def check_team_moves() -> None:
     print("team moves ok")
 
 
+async def check_week_switch_schedule() -> None:
+    """Автосмена недель: закрытие в последний день, открытие в день старта, анонс один раз."""
+    import datetime as _dt
+
+    from app import scheduler as sched
+    from app.config import settings as cfg
+
+    assert cfg.close_at == (23, 55) and cfg.open_at == (0, 1), (cfg.close_at, cfg.open_at)
+    w1, w2 = cfg.weeks[0], cfg.weeks[1]
+    assert cfg.week_by_end(w1.end).number == 1
+    assert cfg.week_by_start(w2.start).number == 2
+    assert cfg.week_by_end(w1.end - _dt.timedelta(days=1)) is None
+
+    class FakeBot:
+        async def send_message(self, *a, **k):
+            return None
+
+    original_today = cfg.today
+    async with SessionLocal() as s:
+        for w in (1, 2, 3):
+            await services.set_week_open(s, w, False)
+        await services.set_week_open(s, 1, True)
+        await s.commit()
+        await services.load_open_weeks(s)
+    try:
+        # Не последний день — ничего не закрываем.
+        cfg.today = lambda: w1.end - _dt.timedelta(days=1)
+        await sched.close_week_job(FakeBot())
+        assert services.week_is_open(1), "неделю закрыли раньше времени"
+        # Последний день — закрываем.
+        cfg.today = lambda: w1.end
+        await sched.close_week_job(FakeBot())
+        assert not services.week_is_open(1), "неделя должна закрыться в свой последний день"
+        # Повторный запуск ничего не ломает.
+        await sched.close_week_job(FakeBot())
+        # День старта второй недели — открываем.
+        cfg.today = lambda: w2.start
+        await sched.open_week_job(FakeBot())
+        assert services.week_is_open(2), "вторая неделя должна открыться в день старта"
+        assert not services.week_is_open(1), "прошлая неделя остаётся закрытой"
+        await sched.open_week_job(FakeBot())
+        assert services.open_weeks() == [2]
+    finally:
+        cfg.today = original_today
+        async with SessionLocal() as s:
+            await services.set_week_open(s, 2, False)
+            await services.set_week_open(s, 1, True)
+            await s.commit()
+            await services.load_open_weeks(s)
+
+    # Тексты финала недели.
+    assert "23:55" in texts.last_call(1, "23:55", 2, 900, None)
+    assert "черновиком" in texts.last_call(1, "23:55", 1, 200, "Тайный доброжелатель")
+    for args in ((1, "23:55", 0, 0, None), (1, "23:55", 3, 1200, None)):
+        assert len(texts.last_call(*args)) <= 4096
+    closed = texts.week_closed(1, 2, "00:01")
+    assert "00:01" in closed and "Неделя 1 закрыта" in closed
+    assert "откроются" not in texts.week_closed(3, None, "00:01")
+    print("week schedule ok")
+
+
+async def check_stuck_report() -> None:
+    """Отчёт «кто застрял»: черновики с номером шага, отказы и те, кто не начинал."""
+    async with SessionLocal() as s:
+        await services.load_open_weeks(s)
+        report = await services.stuck_report(s)
+        assert set(report) >= {"week", "drafts", "rejected", "idle", "pending", "done"}
+        for item in report["drafts"]:
+            assert 1 <= item["step"] <= item["steps"], item
+            assert item["task"] and item["title"]
+        screen = texts.stuck_screen(report)
+        assert "Кто ещё не сдал" in screen and len(screen) <= 4096
+        assert "Ни одна неделя не открыта" in texts.stuck_screen({"week": 0})
+    print("stuck report ok")
+
+
 async def check_tops() -> None:
     """Два зачёта: команды и ТОП-10 участников. Своё место видно всегда."""
     async with SessionLocal() as s:
@@ -1427,6 +1503,8 @@ async def main() -> None:
     await check_report_edge_cases()
     await check_manual_results()
     await check_team_moves()
+    await check_week_switch_schedule()
+    await check_stuck_report()
     await check_tops()
     await check_gallery()
     await check_nudges()

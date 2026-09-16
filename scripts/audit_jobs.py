@@ -71,7 +71,10 @@ async def main():
                       ("сводка админам", sched.admin_digest_job), ("мотивация", sched.motivation_job),
                       ("топ участников", sched.top_digest_job), ("keepalive", sched.keepalive_job),
                       ("еженедельная мотивация", sched.weekly_motivation_job),
-                      ("инструкция дня", sched.howto_job), ("личные подсказки", sched.nudge_job)):
+                      ("инструкция дня", sched.howto_job), ("личные подсказки", sched.nudge_job),
+                      ("последний рывок", sched.last_call_job),
+                      ("закрытие недели", sched.close_week_job),
+                      ("открытие недели", sched.open_week_job)):
         try:
             await job(bot); check(True, name)
         except Exception as ex: check(False, f"{name}: {type(ex).__name__}: {ex}")

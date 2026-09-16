@@ -118,6 +118,12 @@ class Settings:
     weekly_hour: int = int(os.getenv("WEEKLY_HOUR", "10"))
     # Личные подсказки каждому участнику по его состоянию и обучающая серия «что и куда».
     nudge_hour: int = int(os.getenv("NUDGE_HOUR", "16"))
+    # Автоматическая смена недель: закрыть текущую вечером её последнего дня и открыть
+    # следующую сразу после полуночи. 0 — переключать только вручную из панели.
+    auto_weeks: bool = os.getenv("AUTO_WEEKS", "1").strip() not in ("0", "false", "no", "")
+    week_close_time: str = os.getenv("WEEK_CLOSE_TIME", "23:55").strip()
+    week_open_time: str = os.getenv("WEEK_OPEN_TIME", "00:01").strip()
+    last_call_hour: int = int(os.getenv("LAST_CALL_HOUR", "19"))  # «последний рывок» в финальный день
     howto_hour: int = int(os.getenv("HOWTO_HOUR", "12"))
     # If set, the week is forced (useful for testing before the marathon starts). 0 = auto.
     # Public URL of this service; when set, the bot pings its own /api/health so a free host does not sleep it.
@@ -160,6 +166,28 @@ class Settings:
 
     def today(self) -> date:
         return self.now().date()
+
+    @staticmethod
+    def _hhmm(raw: str, default: tuple[int, int]) -> tuple[int, int]:
+        try:
+            hour, _, minute = raw.partition(":")
+            return int(hour), int(minute)
+        except ValueError:
+            return default
+
+    @property
+    def close_at(self) -> tuple[int, int]:
+        return self._hhmm(self.week_close_time, (23, 55))
+
+    @property
+    def open_at(self) -> tuple[int, int]:
+        return self._hhmm(self.week_open_time, (0, 1))
+
+    def week_by_start(self, d: date) -> "Week | None":
+        return next((w for w in self.weeks if w.start == d), None)
+
+    def week_by_end(self, d: date) -> "Week | None":
+        return next((w for w in self.weeks if w.end == d), None)
 
     def week(self, n: int) -> Week | None:
         for w in self.weeks:

@@ -696,6 +696,31 @@ async def cb_howto(cq: CallbackQuery) -> None:
                    f"отправлена {n} участникам.", kb.back_kb("adm", "🛠 Панель"))
 
 
+@router.callback_query(F.data == "adm:stuck")
+async def cb_stuck(cq: CallbackQuery) -> None:
+    """Кто ещё не сдал и на каком шаге застрял."""
+    async with session() as s:
+        report = await services.stuck_report(s)
+    has = bool(report["drafts"] or report["rejected"] or report["idle"])
+    await edit(cq, texts.stuck_screen(report), kb.stuck_kb(has))
+    await answer_cq(cq)
+
+
+@router.callback_query(F.data == "adm:lastcall")
+async def cb_lastcall(cq: CallbackQuery) -> None:
+    """Ручной запуск «последнего рывка» — того же сообщения, что уходит вечером."""
+    from ...scheduler import last_call_job
+
+    cw = services.current_week()
+    if not cw:
+        await answer_cq(cq, "Ни одна неделя не открыта.", alert=True)
+        return
+    await answer_cq(cq, "Рассылаю…")
+    sent = await last_call_job(cq.bot, force=True)
+    await edit(cq, f"⚡ «Последний рывок» по неделе {cw.number} отправлен: {sent} участникам.",
+               kb.back_kb("adm:stuck", "🔍 Кто ещё не сдал"))
+
+
 @router.callback_query(F.data == "adm:nudge")
 async def cb_nudge(cq: CallbackQuery) -> None:
     """Личные подсказки: каждому своё сообщение по его состоянию."""

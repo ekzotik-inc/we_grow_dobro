@@ -1143,6 +1143,48 @@ async def nudge_for_user(s, user: User) -> tuple[str, dict] | None:
                       "possible": sum(max((o.points for o in t.options), default=t.points) for t in rest)}
 
 
+async def stuck_report(s, week: int | None = None) -> dict:
+    """Кто застрял: незаконченные черновики, отклонённые отчёты и те, кто не начинал.
+
+    Нужен перед закрытием недели: видно поимённо, кому написать, и на каком шаге человек
+    остановился.
+    """
+    cw = current_week()
+    week = week or (cw.number if cw else 0)
+    tasks = await list_tasks(s, week) if week else []
+    out = {"week": week, "total_tasks": len(tasks), "drafts": [], "rejected": [],
+           "idle": [], "pending": [], "done": []}
+    if not week:
+        return out
+    for user in await list_participants(s):
+        if user.status != UserStatus.registered:
+            continue
+        subs = [x for x in await user_submissions(s, user.id) if x.week == week]
+        drafts = [x for x in subs if x.status == SubmissionStatus.draft and (x.files or x.answers)]
+        rejected = [x for x in subs if x.status == SubmissionStatus.rejected]
+        sent = [x for x in subs if x.status in (SubmissionStatus.pending, SubmissionStatus.approved)]
+        who = {"user": user, "team": f"{user.team.emoji} {user.team.name}" if user.team else "—",
+               "sent": len(sent)}
+        if drafts:
+            sub = drafts[0]
+            steps = submission_steps(sub)
+            left = steps_left(sub)
+            step_no = (left[0] + 1) if left else len(steps)
+            title = steps[left[0]]["title"] if left and left[0] < len(steps) else "осталось отправить"
+            out["drafts"].append({**who, "task": sub.task.title, "step": step_no,
+                                  "steps": len(steps), "title": title})
+        elif rejected:
+            out["rejected"].append({**who, "task": rejected[0].task.title,
+                                    "reason": rejected[0].review_comment or ""})
+        elif not sent:
+            out["idle"].append(who)
+        elif len(sent) >= len(tasks):
+            out["done"].append(who)
+        else:
+            out["pending"].append(who)
+    return out
+
+
 async def nudge_targets(s) -> list[tuple[User, str, dict]]:
     """Кому и какую подсказку отправить сегодня."""
     out = []

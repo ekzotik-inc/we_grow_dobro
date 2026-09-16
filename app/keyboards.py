@@ -699,7 +699,18 @@ def announce_kb() -> InlineKeyboardMarkup:
     kb.row(*[_btn(f"📣 Неделя {w.number}", f"adm:announce_ok:{w.number}") for w in settings.weeks])
     kb.row(_btn("💚 Мотивация недели", "adm:weekly"))
     kb.row(_btn("💡 Инструкция дня", "adm:howto"), _btn("🎯 Личные подсказки", "adm:nudge"))
+    kb.row(_btn("🔍 Кто ещё не сдал", "adm:stuck"))
     kb.row(_btn("⬅️ Панель", "adm"))
+    return kb.as_markup()
+
+
+def stuck_kb(has_targets: bool) -> InlineKeyboardMarkup:
+    """Отчёт «кто застрял»: сразу можно написать всем, кто не закончил."""
+    kb = InlineKeyboardBuilder()
+    if has_targets:
+        kb.row(_btn("✉️ Написать им подсказки", "adm:nudge", style="primary"))
+    kb.row(_btn("⚡ Последний рывок всем", "adm:lastcall"))
+    kb.row(_btn("🔄 Обновить", "adm:stuck"), _btn("⬅️ Панель", "adm"))
     return kb.as_markup()
 
 

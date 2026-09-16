@@ -77,5 +77,13 @@ services:
         value: "12"
       - key: NUDGE_HOUR        # час личных подсказок участникам
         value: "16"
+      - key: LAST_CALL_HOUR    # час напоминания «последний рывок» в финальный день недели
+        value: "19"
+      - key: AUTO_WEEKS        # 1 — бот сам закрывает и открывает недели
+        value: "1"
+      - key: WEEK_CLOSE_TIME   # закрытие недели в её последний день
+        value: "23:55"
+      - key: WEEK_OPEN_TIME    # открытие следующей недели с анонсом
+        value: "00:01"
       - key: DB_EXPIRES_AT     # у платной базы Render срока нет — оставляем пустым
         value: ""
