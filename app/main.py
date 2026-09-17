@@ -20,7 +20,7 @@ from aiogram.types import (
 
 from . import emoji, services
 from .bot.handlers import setup_routers
-from .bot.middlewares import db_retry, premium_emoji_guard
+from .bot.middlewares import db_retry, disqualified_guard, premium_emoji_guard
 from .config import settings
 from .db import SessionLocal, init_db
 from .scheduler import build_scheduler
@@ -112,6 +112,8 @@ async def run() -> None:
     dp = Dispatcher(storage=MemoryStorage())
     # База на бесплатном тарифе засыпает: первое действие после паузы повторяем, а не теряем.
     dp.update.outer_middleware(db_retry)
+    # Проверка «снят с марафона» — сразу после повторов к базе и до всех обработчиков.
+    dp.update.outer_middleware(disqualified_guard)
     dp.include_router(setup_routers())
     scheduler = None
     try:

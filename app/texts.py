@@ -1447,6 +1447,18 @@ def push_results_cleared(points: int, submissions: int = 0) -> str:
     return "\n".join(lines)
 
 
+def disqualified_block(reason: str | None) -> str:
+    """Ответ на любое действие снятого участника: бот для него закрыт."""
+    why = e(reason or "отсутствие активности")
+    return (
+        f"{px('blocked')} <b>Вы дисквалифицированы с марафона</b>\n"
+        f"Причина: <i>{why}</i>\n\n"
+        "Участие приостановлено: задания, отчёты и рейтинг больше недоступны.\n\n"
+        + voice(f"Если считаешь, что это ошибка — напиши {pc_link()}, разберёмся. "
+                "Вернуть участие может только сотрудник P&amp;C.")
+    )
+
+
 def push_disqualified(reason: str) -> str:
     return (
         f"{px('blocked')} <b>Ты снят с марафона</b>\n"

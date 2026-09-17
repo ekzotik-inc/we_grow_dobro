@@ -669,6 +669,105 @@ async def check_team_moves() -> None:
     print("team moves ok")
 
 
+async def check_disqualified_blocked() -> None:
+    """Снятый с марафона не может ничего и на каждое действие получает объяснение."""
+    import datetime
+
+    from aiogram.types import CallbackQuery, Chat, Message, Update
+    from aiogram.types import User as TgUser
+
+    from app.bot.middlewares import disqualified_guard
+
+    uid = 9701
+    async with SessionLocal() as s:
+        u = await services.get_or_create_user(s, uid, "banned")
+        await services.register_user(s, u, "Снятый Участник", "IT", "Ташкент")
+        await services.approve_user(s, u, 999)
+        await s.commit()
+        await services.disqualify(s, u, "отсутствие активности", 999)
+        await s.commit()
+
+    sent: list[tuple[int, str]] = []
+    alerts: list[str] = []
+
+    class FakeBot:
+        id = 1
+
+        async def send_message(self, chat_id, text, **kw):
+            sent.append((chat_id, text))
+
+        async def answer_callback_query(self, _id, text=None, **kw):
+            alerts.append(text or "")
+
+    def message_update(text: str) -> Update:
+        return Update(update_id=1, message=Message(
+            message_id=1, date=datetime.datetime.now(), chat=Chat(id=uid, type="private"),
+            from_user=TgUser(id=uid, is_bot=False, first_name="U"), text=text))
+
+    def callback_update(data: str) -> Update:
+        return Update(update_id=2, callback_query=CallbackQuery(
+            id="1", from_user=TgUser(id=uid, is_bot=False, first_name="U"), chat_instance="1",
+            data=data,
+            message=Message(message_id=1, date=datetime.datetime.now(),
+                            chat=Chat(id=uid, type="private"),
+                            from_user=TgUser(id=uid, is_bot=False, first_name="U"), text="x")))
+
+    reached = []
+
+    async def handler(event, data):
+        reached.append(event)
+        return "прошёл"
+
+    bot = FakeBot()
+    for update in (message_update("/start"), message_update("/menu"), message_update("привет"),
+                   callback_update("menu"), callback_update("tasks"), callback_update("gal"),
+                   callback_update("prizes"), callback_update("top")):
+        sent.clear()
+        alerts.clear()
+        result = await disqualified_guard(handler, update, {"bot": bot})
+        assert result is None, "действие снятого участника не должно доходить до обработчика"
+        assert sent and "дисквалифицированы" in sent[0][1], sent
+        assert "отсутствие активности" in sent[0][1], sent[0][1]
+    assert not reached, "ни одно действие не должно было дойти до обработчика"
+    assert alerts, "по нажатию кнопки должно всплывать предупреждение"
+
+    # Обычный участник и владелец проходят дальше.
+    async with SessionLocal() as s:
+        ok_user = await services.get_or_create_user(s, 9702, "fine")
+        await services.register_user(s, ok_user, "Обычный Участник", "IT", "Ташкент")
+        await services.approve_user(s, ok_user, 999)
+        await s.commit()
+    normal = Update(update_id=3, message=Message(
+        message_id=1, date=datetime.datetime.now(), chat=Chat(id=9702, type="private"),
+        from_user=TgUser(id=9702, is_bot=False, first_name="U"), text="/start"))
+    assert await disqualified_guard(handler, normal, {"bot": bot}) == "прошёл"
+    owner_id = sorted(settings.admin_ids)[0]
+    owner = Update(update_id=4, message=Message(
+        message_id=1, date=datetime.datetime.now(), chat=Chat(id=owner_id, type="private"),
+        from_user=TgUser(id=owner_id, is_bot=False, first_name="A"), text="/del"))
+    assert await disqualified_guard(handler, owner, {"bot": bot}) == "прошёл"
+
+    # После восстановления доступ возвращается.
+    async with SessionLocal() as s:
+        u = await services.get_user(s, uid)
+        await services.reinstate(s, u, 999)
+        await s.commit()
+    assert await disqualified_guard(handler, message_update("/start"), {"bot": bot}) == "прошёл"
+
+    # Сервисы тоже не пускают снятого — на случай обходных путей.
+    async with SessionLocal() as s:
+        u = await services.get_user(s, uid)
+        await services.disqualify(s, u, "отсутствие активности", 999)
+        await s.commit()
+        task = (await services.list_tasks(s, 1))[0]
+        try:
+            await services.start_submission(s, u, task, None)
+            raise AssertionError("снятый участник начал отчёт")
+        except services.ServiceError:
+            pass
+    print("disqualified blocked ok")
+
+
 async def check_cleanup() -> None:
     """/del: массовая дисквалификация неактивных и перетасовка малочисленных команд."""
     async with SessionLocal() as s:
@@ -1601,6 +1700,7 @@ async def main() -> None:
     await check_report_edge_cases()
     await check_manual_results()
     await check_team_moves()
+    await check_disqualified_blocked()
     await check_cleanup()
     await check_week_switch_schedule()
     await check_stuck_report()

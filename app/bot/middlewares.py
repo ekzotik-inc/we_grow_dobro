@@ -94,6 +94,45 @@ async def premium_emoji_guard(make_request, bot, method):
             raise
 
 
+# ---------- снятые с марафона ----------
+
+async def disqualified_guard(handler, event, data):
+    """Снятый участник не должен ничего мочь — и должен понимать почему.
+
+    Проверка стоит перед всеми обработчиками: иначе пришлось бы помнить про неё в каждом
+    экране, и рано или поздно один из них открылся бы. Ответ приходит на любое действие:
+    нажатие кнопки, команду, текст и присланное фото.
+    """
+    from .. import texts
+    from ..config import settings
+    from ..db import SessionLocal
+    from ..models import UserStatus
+    from .. import services
+
+    message = getattr(event, "message", None) or getattr(event, "edited_message", None)
+    cq = getattr(event, "callback_query", None)
+    from_user = getattr(message, "from_user", None) or getattr(cq, "from_user", None)
+    if from_user is None or settings.is_admin(from_user.id):
+        return await handler(event, data)
+
+    async with SessionLocal() as s:
+        user = await services.get_user(s, from_user.id)
+        if user is None or user.status != UserStatus.disqualified:
+            return await handler(event, data)
+        reason = user.disqualified_reason
+
+    bot = data.get("bot")
+    text = texts.disqualified_block(reason)
+    with contextlib.suppress(Exception):
+        if cq is not None:
+            await bot.answer_callback_query(cq.id, "Вы дисквалифицированы с марафона.", show_alert=True)
+            if cq.message is not None:
+                await bot.send_message(cq.message.chat.id, text)
+        elif message is not None:
+            await bot.send_message(message.chat.id, text)
+    return None
+
+
 # ---------- устойчивость к засыпающей базе ----------
 
 _DB_ERRORS = ("InterfaceError", "OperationalError", "ConnectionDoesNotExistError",
