@@ -85,7 +85,10 @@ async def main():
         check("push_deleted", texts.push_deleted())
         check("user_deleted", texts.user_deleted({"name":"Иван","submissions":2,"points":400}))
         check("user_delete_confirm", texts.user_delete_confirm(u, 2, 400))
-        check("top_digest", texts.top_digest(rows, [("Иван","🔥 Добряки",200)]))
+        people = [{"id": 1, "name": "Иван", "team": "🔥 Добряки", "points": 200}]
+        check("top_digest", texts.top_digest(rows, people))
+        check("top_people", texts.top_people_text(people, 1, len(people)))
+        check("disqualified_block", texts.disqualified_block("отсутствие активности"))
         for i in range(6): check(f"motivation:{i}", texts.motivation(i))
         check("submission_sent", texts.submission_sent(tasks[0]))
     widest.sort(reverse=True)
