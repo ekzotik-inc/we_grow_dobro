@@ -1197,6 +1197,45 @@ async def check_step_requirements() -> None:
     print("step requirements ok")
 
 
+def check_week_reminder_dates() -> None:
+    """Напоминание обязано называть настоящий срок: «завтра» — только если завтра."""
+    import datetime
+
+    from app.config import settings as cfg
+
+    week = 2
+    end = cfg.week_deadline(week).date()
+    original_today = cfg.today
+    try:
+        cases = {
+            end - datetime.timedelta(days=6): ("6 дней", "заканчивается завтра"),
+            end - datetime.timedelta(days=1): ("заканчивается завтра", "заканчивается сегодня"),
+            end: ("заканчивается сегодня", "заканчивается завтра"),
+            end + datetime.timedelta(days=1): ("уже закрыта", "заканчивается завтра"),
+        }
+        for day, (must, must_not) in cases.items():
+            cfg.today = lambda d=day: d
+            text = texts.week_reminder(week)
+            assert must in text, (day, text.splitlines()[0])
+            assert must_not not in text, (day, text.splitlines()[0])
+            assert len(text) <= 4096
+
+        # Извинение всегда называет верный остаток и признаёт ошибку.
+        cfg.today = lambda: end - datetime.timedelta(days=6)
+        sorry = texts.dobrik_apology(week)
+        assert "ошибся" in sorry and "Это неправда" in sorry
+        assert "6 дней" in sorry and _date_ru_in(sorry, end)
+        assert "выспаться" in sorry, "Добрик должен объяснить, почему перепутал"
+        assert len(sorry) <= 4096
+    finally:
+        cfg.today = original_today
+    print("week reminder dates ok")
+
+
+def _date_ru_in(text: str, day) -> bool:
+    return texts._date_ru(day) in text
+
+
 def check_eco_menu_button() -> None:
     """Зелёная кнопка в меню живёт ровно сутки: до окна и после него её нет."""
     import datetime
@@ -1777,6 +1816,7 @@ async def main() -> None:
     await check_gallery()
     await check_nudges()
     await check_step_requirements()
+    check_week_reminder_dates()
     check_eco_menu_button()
     check_eco_announce()
     check_ready_screen()

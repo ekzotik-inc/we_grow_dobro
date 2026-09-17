@@ -705,6 +705,7 @@ def announce_kb() -> InlineKeyboardMarkup:
     kb.row(_btn("💡 Инструкция дня", "adm:howto"), _btn("🎯 Личные подсказки", "adm:nudge"))
     kb.row(_btn("🔍 Кто ещё не сдал", "adm:stuck"))
     kb.row(_btn("🌿 Анонс Eco Photo Assistant", "adm:eco"))
+    kb.row(_btn("🤫 Извинение от Добрика", "adm:sorry"))
     kb.row(_btn("⬅️ Панель", "adm"))
     return kb.as_markup()
 
@@ -748,6 +749,14 @@ def eco_admin_kb(has_photo: bool) -> InlineKeyboardMarkup:
     kb.row(_btn("📤 Разослать всем участникам", "adm:eco_send", style="primary"))
     kb.row(_btn("🖼 Заменить картинку" if has_photo else "🖼 Добавить картинку", "adm:eco_photo"))
     kb.row(_btn("⬅️ Назад", "adm:announce"))
+    return kb.as_markup()
+
+
+def preview_send_kb(action: str, back: str = "adm") -> InlineKeyboardMarkup:
+    """Предпросмотр рассылки: сначала показываем текст, и только потом отправляем."""
+    kb = InlineKeyboardBuilder()
+    kb.row(_btn("📤 Разослать", f"{action}", style="primary"))
+    kb.row(_btn("⬅️ Отмена", back))
     return kb.as_markup()
 
 

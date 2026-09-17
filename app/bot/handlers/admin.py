@@ -1228,6 +1228,22 @@ async def cb_team_del_ok(cq: CallbackQuery, state: FSMContext) -> None:
 
 @router.callback_query(F.data == "adm:remind")
 async def cb_remind(cq: CallbackQuery) -> None:
+    """Сначала предпросмотр: текст напоминания зависит от даты, и его нужно увидеть до отправки."""
+    cw = services.current_week()
+    if not cw:
+        await answer_cq(cq, "Сейчас нет активной недели", alert=True)
+        return
+    async with session() as s:
+        users = await services.segment_users(s, "no_reports_week")
+    await edit(cq, f"⏰ <b>Напоминание · {len(users)} получателей</b>\n"
+                   f"<i>участники без отчётов на неделе {cw.number}</i>\n\n"
+                   + texts.week_reminder(cw.number),
+               kb.preview_send_kb("adm:remind_ok"))
+    await answer_cq(cq)
+
+
+@router.callback_query(F.data == "adm:remind_ok")
+async def cb_remind_ok(cq: CallbackQuery) -> None:
     cw = services.current_week()
     if not cw:
         await answer_cq(cq, "Сейчас нет активной недели", alert=True)
@@ -1235,8 +1251,36 @@ async def cb_remind(cq: CallbackQuery) -> None:
     await answer_cq(cq, "Отправляю напоминания…")
     async with session() as s:
         users = await services.segment_users(s, "no_reports_week")
-        n = await send_to_users(cq.bot, s, users, texts.week_reminder(cw.number), f"reminder:{cw.number}:manual")
-    await edit(cq, f"⏰ Напоминание отправлено {n} участникам без отчётов на {cw.number} неделе.", kb.back_kb("adm", "🛠 Панель"))
+        n = await send_to_users(cq.bot, s, users, texts.week_reminder(cw.number),
+                                f"reminder:{cw.number}:manual:{settings.now():%Y-%m-%d %H:%M}",
+                                markup=kb.push_kb())
+    await edit(cq, f"⏰ Напоминание отправлено {n} участникам без отчётов на {cw.number} неделе.",
+               kb.back_kb("adm", "🛠 Панель"))
+
+
+@router.callback_query(F.data == "adm:sorry")
+async def cb_sorry(cq: CallbackQuery) -> None:
+    """Извинение Добрика за ошибочное напоминание — с предпросмотром."""
+    cw = services.current_week()
+    if not cw:
+        await answer_cq(cq, "Сейчас нет активной недели", alert=True)
+        return
+    await edit(cq, texts.dobrik_apology(cw.number), kb.preview_send_kb("adm:sorry_ok"))
+    await answer_cq(cq)
+
+
+@router.callback_query(F.data == "adm:sorry_ok")
+async def cb_sorry_ok(cq: CallbackQuery) -> None:
+    cw = services.current_week()
+    if not cw:
+        await answer_cq(cq, "Сейчас нет активной недели", alert=True)
+        return
+    await answer_cq(cq, "Рассылаю…")
+    async with session() as s:
+        n = await broadcast(cq.bot, s, texts.dobrik_apology(cw.number),
+                            f"apology:{cw.number}:{settings.now():%Y-%m-%d %H:%M}",
+                            markup=kb.push_kb())
+    await edit(cq, f"🤫 Извинение отправлено {n} участникам.", kb.back_kb("adm", "🛠 Панель"))
 
 
 # ---------- stats / export ----------
