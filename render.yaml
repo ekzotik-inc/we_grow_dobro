@@ -79,6 +79,10 @@ services:
         value: "16"
       - key: LAST_CALL_HOUR    # час напоминания «последний рывок» в финальный день недели
         value: "19"
+      - key: ECO_BANNER_FROM   # появление кнопки Eco Photo Assistant в меню
+        value: "2026-09-17 22:22"
+      - key: ECO_BANNER_UNTIL  # кнопка гаснет сама; пусто — не показывать вовсе
+        value: "2026-09-18 22:22"
       - key: AUTO_WEEKS        # 1 — бот сам закрывает и открывает недели
         value: "1"
       - key: WEEK_CLOSE_TIME   # закрытие недели в её последний день

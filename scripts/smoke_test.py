@@ -1197,6 +1197,48 @@ async def check_step_requirements() -> None:
     print("step requirements ok")
 
 
+def check_eco_menu_button() -> None:
+    """Зелёная кнопка в меню живёт ровно сутки: до окна и после него её нет."""
+    import datetime
+
+    import app.keyboards as kbs
+    from app.config import settings as cfg
+    from app.models import User as U
+
+    user = U(id=1, tg_id=1, full_name="Иван", status=UserStatus.registered, team_id=None)
+
+    def buttons():
+        return [b for row in kbs.main_menu_kb(user).inline_keyboard for b in row]
+
+    original_now = cfg.now
+    start = cfg._moment(cfg.eco_banner_from)
+    end = cfg._moment(cfg.eco_banner_until)
+    assert start and end and (end - start) == datetime.timedelta(hours=24), (start, end)
+    try:
+        cfg.now = lambda: start - datetime.timedelta(minutes=1)
+        assert not cfg.eco_banner_visible()
+        assert not any(b.url for b in buttons()), "до начала окна кнопки быть не должно"
+        assert texts.eco_hint() == ""
+
+        cfg.now = lambda: start + datetime.timedelta(hours=12)
+        assert cfg.eco_banner_visible()
+        eco = [b for b in buttons() if b.url]
+        assert len(eco) == 1, eco
+        assert eco[0].url == texts.ECO_AGENT_URL
+        assert eco[0].style == "success", "кнопка должна быть зелёной"
+        assert "Eco Photo" in eco[0].text
+        hint = texts.eco_hint()
+        assert "зелёную кнопку" in hint and "сутки" in hint
+
+        cfg.now = lambda: end + datetime.timedelta(minutes=1)
+        assert not cfg.eco_banner_visible()
+        assert not any(b.url for b in buttons()), "после окна кнопка гаснет сама"
+        assert texts.eco_hint() == ""
+    finally:
+        cfg.now = original_now
+    print("eco menu button ok")
+
+
 def check_eco_announce() -> None:
     """Анонс Eco Photo Assistant: ссылки внутри слов, кнопка-ссылка, лимит подписи."""
     import re as _re
@@ -1735,6 +1777,7 @@ async def main() -> None:
     await check_gallery()
     await check_nudges()
     await check_step_requirements()
+    check_eco_menu_button()
     check_eco_announce()
     check_ready_screen()
     await check_review_cards()

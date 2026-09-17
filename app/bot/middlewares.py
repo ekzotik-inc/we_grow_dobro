@@ -37,6 +37,21 @@ def _has_custom_emoji(method) -> bool:
     return any(getattr(b, "icon_custom_emoji_id", None) for b in _buttons(method))
 
 
+# Отказы, связанные с оформлением кнопок: цвет и иконка — новые поля Bot API, и клиент
+# Telegram может их не принять. Сообщение из-за этого теряться не должно.
+_BUTTON_ERRORS = ("button", "style", "keyboard")
+
+
+def _strip_button_styles(method) -> bool:
+    """Снять цвета кнопок. Возвращает True, если было что снимать."""
+    changed = False
+    for button in _buttons(method):
+        if getattr(button, "style", None):
+            object.__setattr__(button, "style", None)
+            changed = True
+    return changed
+
+
 def _strip_custom_emoji(method) -> None:
     for field in _TEXT_FIELDS:
         value = getattr(method, field, None)
@@ -79,7 +94,13 @@ async def premium_emoji_guard(make_request, bot, method):
         return await make_request(bot, method)
     except TelegramBadRequest as ex:
         message = str(ex)
-        if not (_has_custom_emoji(method) and any(m.lower() in message.lower() for m in _EMOJI_ERRORS)):
+        low = message.lower()
+        if any(m in low for m in _BUTTON_ERRORS) and _strip_button_styles(method):
+            # Цвет кнопки — украшение. Лучше отправить без него, чем не отправить вовсе.
+            log.warning("Telegram отклонил оформление кнопок (%s) — отправляю без цветов", message)
+            _strip_custom_emoji(method)
+            return await make_request(bot, method)
+        if not (_has_custom_emoji(method) and any(m.lower() in low for m in _EMOJI_ERRORS)):
             raise
         log.warning("Telegram отклонил премиум-эмодзи (%s) — отправляю обычными", message)
         emoji.disable(f"Telegram отклонил премиум-эмодзи: {message}")

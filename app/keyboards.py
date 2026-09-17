@@ -103,6 +103,10 @@ def main_menu_kb(user: User, pending: int = 0) -> InlineKeyboardMarkup:
         kb.row(_btn("🌱 Моя команда", f"team:{user.team_id}", style="primary"))
         kb.row(_btn("📋 Задания недели", "tasks"))
 
+    if settings.eco_banner_visible():
+        # Кнопка живёт ровно сутки и гаснет сама — ни в какой момент её не надо снимать руками.
+        kb.row(InlineKeyboardButton(text="📸 Eco Photo Assistant",
+                                    url=texts_eco_url(), style="success"))
     kb.row(_btn("⚡ Мой вклад", "me"), _btn("🏆 Рейтинг", "top"))
     kb.row(_btn("🖼 Галерея", "gal"), _btn("🎁 Призы", "prizes"))
     kb.row(_btn("📖 Правила", "rules"), _btn("💬 Помощь", "help"))

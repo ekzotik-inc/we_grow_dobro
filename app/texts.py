@@ -274,8 +274,17 @@ def main_menu(user: User, my_points: int, team_points: int | None, team_rank: in
     else:
         left = 4 - sent
         line = f"Хороший темп! Можно взять ещё {left} {plural(left, 'задание', 'задания', 'заданий')} на этой неделе."
-    lines.append(voice(line + "\nЖми «Задания недели» — покажу, что осталось."))
+    lines.append(voice(line + "\nЖми «Задания недели» — покажу, что осталось."
+                       + eco_hint()))
     return "\n".join(lines)
+
+
+def eco_hint() -> str:
+    """Подсказка про Eco Photo Assistant — только в те сутки, когда кнопка видна в меню."""
+    if not settings.eco_banner_visible():
+        return ""
+    return ("\nИ обязательно попробуй зелёную кнопку <b>«Eco Photo Assistant»</b> — "
+            "он причешет фото с эко-тимбилдинга за пару секунд. Кнопка только на сутки.")
 
 
 def teams_list(teams: list[dict], user: User) -> str:
