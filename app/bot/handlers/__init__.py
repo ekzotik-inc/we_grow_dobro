@@ -1,6 +1,6 @@
 from aiogram import Router
 
-from . import admin, gallery, moderation, results, start, tasks, teams
+from . import admin, cleanup, gallery, moderation, results, start, tasks, teams
 
 
 def setup_routers() -> Router:
@@ -8,6 +8,7 @@ def setup_routers() -> Router:
     # Admin and moderation first: their deep links (/start modrej_, /start subrej_) must win over /start.
     # Ручная корректировка результатов — до админ-панели: у неё свой, более узкий доступ.
     root.include_router(results.router)
+    root.include_router(cleanup.router)
     root.include_router(admin.router)
     root.include_router(moderation.router)
     root.include_router(start.router)

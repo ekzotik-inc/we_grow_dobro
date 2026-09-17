@@ -207,12 +207,18 @@ async def check_admin_router_blocks() -> None:
 
     # Скрытые команды владельца недоступны ни участнику, ни сотруднику P&C.
     for uid in (stranger, sorted(settings.pc_ids)[0]):
-        for text in ("/addresult", "/emojiid", "/emojifix 🚀 123"):
+        for text in ("/addresult", "/emojiid", "/emojifix 🚀 123", "/del"):
             seen.clear()
             await dp.feed_update(bot, message_update(uid, text))
-            assert not any(h.startswith("results.") for h in seen), f"{uid} попал в {text}: {seen}"
+            assert not any(h.startswith(("results.", "cleanup.")) for h in seen), \
+                f"{uid} попал в {text}: {seen}"
+        for data in ("del", "del:inactive", "del:inactive_ok", "del:merge", "del:merge_ok"):
+            seen.clear()
+            await dp.feed_update(bot, callback_update(uid, data))
+            assert not any(h.startswith("cleanup.") for h in seen), f"{uid} нажал {data}: {seen}"
     owner = sorted(settings.admin_ids)[0]
-    for text, expected in (("/emojiid", "results.cmd_emoji_id"), ("/emojifix", "results.cmd_emoji_fix")):
+    for text, expected in (("/emojiid", "results.cmd_emoji_id"), ("/emojifix", "results.cmd_emoji_fix"),
+                           ("/del", "cleanup.cmd_del")):
         seen.clear()
         await dp.feed_update(bot, message_update(owner, text))
         assert seen == [expected], f"владельцу недоступно {text}: {seen}"
@@ -663,6 +669,93 @@ async def check_team_moves() -> None:
     print("team moves ok")
 
 
+async def check_cleanup() -> None:
+    """/del: массовая дисквалификация неактивных и перетасовка малочисленных команд."""
+    async with SessionLocal() as s:
+        # Отдельные команды и люди, чтобы не задеть данные других проверок.
+        big = await services.create_team(s, None, "Большая", "🐘")
+        mid = await services.create_team(s, None, "Средняя", "🐎")
+        tiny = await services.create_team(s, None, "Крошка", "🐜")
+        await s.commit()
+
+        async def member(tg: int, team, active: bool):
+            u = await services.get_or_create_user(s, tg, f"clean{tg}")
+            await services.register_user(s, u, f"Чистка {tg}", "IT", "Ташкент")
+            await services.approve_user(s, u, 999)
+            if team:
+                await services.move_user_to_team(s, u, team.id)
+            await s.commit()
+            if active:
+                await services.set_week_open(s, 1, True)
+                await s.commit()
+                await services.load_open_weeks(s)
+                task = next(t for t in await services.list_tasks(s, 1) if not t.has_options)
+                sub = await services.start_submission(s, u, task, None)
+                await fill_steps(s, sub)
+                await services.send_for_review(s, sub)
+                await s.commit()
+            return u
+
+        lazy = await member(9601, big, active=False)
+        worker = await member(9602, big, active=True)
+        await member(9603, mid, active=False)
+        small_one = await member(9604, tiny, active=False)
+
+        # 1. Неактивные: тот, кто отправил отчёт, в список не попадает.
+        inactive = await services.inactive_participants(s)
+        ids = {u.id for u in inactive}
+        assert lazy.id in ids and worker.id not in ids, "отправивший отчёт не неактивен"
+        assert all(not settings.is_admin(u.tg_id) for u in inactive), "владельца не трогаем"
+        assert all(u.status == UserStatus.registered for u in inactive)
+
+        # Черновик отправкой не считается.
+        draft_user = await member(9605, big, active=False)
+        task = next(t for t in await services.list_tasks(s, 1) if not t.has_options)
+        sub = await services.start_submission(s, draft_user, task, None)
+        await services.add_file(s, sub, {"type": "photo", "file_id": "p"}, step=0)
+        await s.commit()
+        assert draft_user.id in {u.id for u in await services.inactive_participants(s)}
+
+        # 2. Самые малочисленные команды: «Крошка» одна, получатели — остальные.
+        donors, receivers = await services.smallest_teams(s)
+        donor_names = {t.name for t, _ in donors}
+        assert "Крошка" in donor_names, donor_names
+        assert "Большая" not in donor_names, "самую большую команду не расформировываем"
+        assert receivers, "должны быть команды-получатели"
+
+        info = await services.merge_smallest_teams(s, actor_tg_id=999, seed=1)
+        await s.commit()
+        assert info["moved"], info
+        assert await services.get_user(s, small_one.tg_id) is not None
+        moved_user = await services.get_user(s, 9604)
+        assert moved_user.team_id and moved_user.team.name != "Крошка", "участник должен переехать"
+        assert all(t.name != "Крошка" for t in await services.list_teams(s)), \
+            "пустая команда удаляется"
+        # Лимит состава не нарушен.
+        for team in await services.list_teams(s):
+            assert await services.team_active_count(s, team.id) <= settings.team_size, team.name
+
+        # 3. Массовая дисквалификация.
+        targets = await services.inactive_participants(s)
+        done = await services.bulk_disqualify(s, targets, "нет отчётов", 999)
+        await s.commit()
+        assert len(done) == len(targets) and all(u.status == UserStatus.disqualified for u in done)
+        assert (await services.get_user(s, worker.tg_id)).status == UserStatus.registered
+        # Повторный запуск никого не трогает.
+        assert await services.bulk_disqualify(s, done, "повтор", 999) == []
+        assert await services.inactive_participants(s) == []
+
+        # Экраны в пределах лимитов.
+        assert len(texts.cleanup_confirm_inactive(done)) <= 4096
+        assert len(texts.cleanup_done_merge(info)) <= 4096
+        assert "Таких нет" in texts.cleanup_root([], [], [])
+
+        for u in done:
+            await services.reinstate(s, u, 999)
+        await s.commit()
+    print("cleanup ok")
+
+
 async def check_week_switch_schedule() -> None:
     """Автосмена недель: закрытие в последний день, открытие в день старта, анонс один раз."""
     import datetime as _dt
@@ -677,7 +770,12 @@ async def check_week_switch_schedule() -> None:
     assert cfg.week_by_end(w1.end - _dt.timedelta(days=1)) is None
 
     class FakeBot:
+        """Заглушка: анонс недели может уйти и картинкой, поэтому нужны оба метода."""
+
         async def send_message(self, *a, **k):
+            return None
+
+        async def send_photo(self, *a, **k):
             return None
 
     original_today = cfg.today
@@ -1503,6 +1601,7 @@ async def main() -> None:
     await check_report_edge_cases()
     await check_manual_results()
     await check_team_moves()
+    await check_cleanup()
     await check_week_switch_schedule()
     await check_stuck_report()
     await check_tops()

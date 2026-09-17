@@ -704,6 +704,26 @@ def announce_kb() -> InlineKeyboardMarkup:
     return kb.as_markup()
 
 
+# ---------- /del: массовые действия (только владелец) ----------
+
+def cleanup_kb(inactive: int, donors: int) -> InlineKeyboardMarkup:
+    kb = InlineKeyboardBuilder()
+    if inactive:
+        kb.row(_btn(f"🚫 Дисквалифицировать неактивных · {inactive}", "del:inactive", style="danger"))
+    if donors:
+        kb.row(_btn(f"🔀 Расформировать малые команды · {donors}", "del:merge"))
+    kb.row(_btn("🔄 Обновить", "del"), _btn("🛠 Панель", "adm"))
+    return kb.as_markup()
+
+
+def cleanup_confirm_kb(action: str) -> InlineKeyboardMarkup:
+    """Подтверждение массового действия: оно необратимо, поэтому спрашиваем отдельно."""
+    kb = InlineKeyboardBuilder()
+    kb.row(_btn("✅ Да, выполнить", f"del:{action}_ok", style="danger"))
+    kb.row(_btn("⬅️ Отмена", "del"))
+    return kb.as_markup()
+
+
 def stuck_kb(has_targets: bool) -> InlineKeyboardMarkup:
     """Отчёт «кто застрял»: сразу можно написать всем, кто не закончил."""
     kb = InlineKeyboardBuilder()

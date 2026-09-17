@@ -958,6 +958,97 @@ def db_expiry_warning() -> str | None:
     )
 
 
+# ---------- массовая чистка (/del) ----------
+
+def cleanup_root(inactive: list, donors: list, receivers: list) -> str:
+    """Экран /del: что бот предлагает сделать разом и кого это затронет."""
+    lines = ["🧹 <b>Массовые действия</b>",
+             "<i>только для владельца · действия необратимы</i>", ""]
+    lines.append(section("🚫 НЕАКТИВНЫЕ УЧАСТНИКИ"))
+    if inactive:
+        lines.append(f"Ни одного отправленного отчёта за весь марафон: <b>{len(inactive)}</b>.")
+        names = ", ".join(e(u.display_name) for u in inactive[:20])
+        lines.append(f"<i>{names}{'…' if len(inactive) > 20 else ''}</i>")
+    else:
+        lines.append("Таких нет — все хотя бы раз отправляли отчёт.")
+
+    lines.append("")
+    lines.append(section("🔀 МАЛОЧИСЛЕННЫЕ КОМАНДЫ"))
+    if donors:
+        size = len(donors[0][1])
+        names = ", ".join(f"{e(t.emoji)} {e(t.name)}" for t, _ in donors)
+        people = sum(len(m) for _, m in donors)
+        free = sum(max(settings.team_size - len(m), 0) for _, m in receivers)
+        lines.append(f"Самые малочисленные: {names} — по {size} "
+                     f"{plural(size, 'участнику', 'участника', 'участников')}.")
+        lines.append(row("👥", "Будут распределены", str(people)))
+        lines.append(row("🆓", "Свободных мест в других командах", str(free)))
+        if people > free:
+            lines.append("<i>Мест меньше, чем людей: кто-то останется без команды — "
+                         "их можно будет распределить вручную.</i>")
+    else:
+        lines.append("Расформировывать нечего: составы ровные или команда всего одна.")
+
+    lines.append("")
+    lines.append(voice("Оба действия сначала покажут, что именно произойдёт, "
+                       "и только потом спросят подтверждение."))
+    return "\n".join(lines)
+
+
+def cleanup_confirm_inactive(users: list) -> str:
+    lines = ["🚫 <b>Дисквалифицировать неактивных?</b>", ""]
+    lines.append(row("👤", "Участников", str(len(users))))
+    lines.append("")
+    for u in users[:25]:
+        team = f" · {e(u.team.emoji)} {e(u.team.name)}" if u.team else ""
+        lines.append(f"• {e(u.display_name)}{team}")
+    if len(users) > 25:
+        lines.append(f"…и ещё {len(users) - 25}")
+    lines.append("")
+    lines.append("Каждый получит уведомление. Их результаты не идут в командный зачёт, "
+                 "но участника всегда можно вернуть через карточку в панели.")
+    return "\n".join(lines)
+
+
+def cleanup_done_inactive(count: int) -> str:
+    return (f"✅ <b>Готово: снято {count} "
+            f"{plural(count, 'участник', 'участника', 'участников')}</b>\n\n"
+            + voice("Вернуть любого можно из панели: Участники → карточка → «Восстановить»."))
+
+
+def cleanup_confirm_merge(donors: list, receivers: list) -> str:
+    people = sum(len(m) for _, m in donors)
+    lines = ["🔀 <b>Расформировать малочисленные команды?</b>", ""]
+    for team, members in donors:
+        lines.append(f"• {e(team.emoji)} {e(team.name)} — {len(members)} "
+                     f"{plural(len(members), 'участник', 'участника', 'участников')}")
+    lines.append("")
+    lines.append(f"Все <b>{people}</b> {plural(people, 'человек', 'человека', 'человек')} "
+                 "попадут в другие команды автоматически: выбор им не предлагается, "
+                 "бот ставит туда, где меньше народу.")
+    lines.append("Пустые команды после этого удаляются.")
+    lines.append("")
+    lines.append("<i>Баллы переезжают вместе с участниками.</i>")
+    return "\n".join(lines)
+
+
+def cleanup_done_merge(info: dict) -> str:
+    moved = info["moved"]
+    lines = ["✅ <b>Команды перераспределены</b>", ""]
+    lines.append(row("🗑", "Расформировано команд", str(len(info["teams"]))))
+    lines.append(row("👥", "Переведено участников", str(len(moved))))
+    if info["left"]:
+        lines.append(row("❗", "Без команды (не хватило мест)", str(len(info["left"]))))
+    lines.append("")
+    for item in moved[:25]:
+        lines.append(f"• {e(item['user'].display_name)} → {e(item['to'])}")
+    if len(moved) > 25:
+        lines.append(f"…и ещё {len(moved) - 25}")
+    lines.append("")
+    lines.append(voice("Каждому пришло уведомление о новой команде."))
+    return "\n".join(lines)
+
+
 # ---------- финал недели ----------
 
 def last_call(week: int, deadline: str, left_tasks: int, possible: int, in_draft: str | None) -> str:

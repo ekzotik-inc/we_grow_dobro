@@ -1,6 +1,7 @@
 """Business logic. Every function takes an AsyncSession and never touches Telegram."""
 from __future__ import annotations
 
+import random
 import re
 from datetime import datetime
 
@@ -1141,6 +1142,106 @@ async def nudge_for_user(s, user: User) -> tuple[str, dict] | None:
     return "almost", {**base, "done": len(sent), "total": total,
                       "left_tasks": len(rest),
                       "possible": sum(max((o.points for o in t.options), default=t.points) for t in rest)}
+
+
+# ---------- массовая чистка (/del, только владелец) ----------
+
+async def inactive_participants(s) -> list[User]:
+    """Кто за весь марафон не отправил ни одного отчёта.
+
+    Черновик не считается отправкой: человек мог открыть задание и бросить. Сотрудники
+    и владелец в список не попадают — у них другая роль.
+    """
+    out = []
+    for user in await list_participants(s):
+        if user.status != UserStatus.registered or settings.is_admin(user.tg_id):
+            continue
+        subs = await user_submissions(s, user.id)
+        if not any(x.status in (SubmissionStatus.pending, SubmissionStatus.approved) for x in subs):
+            out.append(user)
+    return out
+
+
+async def bulk_disqualify(s, users: list[User], reason: str, actor_tg_id: int) -> list[User]:
+    """Снять с марафона сразу нескольких. Возвращает тех, кого действительно сняли."""
+    done = []
+    for user in users:
+        if user.status != UserStatus.registered:
+            continue
+        await disqualify(s, user, reason, actor_tg_id)
+        done.append(user)
+    await s.flush()
+    return done
+
+
+async def teams_by_size(s) -> list[tuple[Team, list[User]]]:
+    """Команды с их живым составом, от самых малочисленных к большим."""
+    rows = []
+    for team in await list_teams(s):
+        rows.append((team, team_active_members(team)))
+    rows.sort(key=lambda r: (len(r[1]), r[0].name.lower()))
+    return rows
+
+
+async def smallest_teams(s) -> tuple[list[tuple[Team, list[User]]], list[tuple[Team, list[User]]]]:
+    """Разделить команды на «самые малочисленные» и «остальные».
+
+    Малочисленные — те, где участников столько же, сколько в самой маленькой непустой
+    команде, и при этом меньше полного состава. Их расформировываем, людей раскидываем.
+    """
+    rows = [r for r in await teams_by_size(s)]
+    alive = [r for r in rows if r[1]]
+    if len(alive) < 2:
+        return [], rows
+    smallest = len(alive[0][1])
+    if smallest >= settings.team_size:
+        return [], rows
+    donors = [r for r in alive if len(r[1]) == smallest]
+    receivers = [r for r in rows if r not in donors]
+    if not receivers:
+        return [], rows
+    return donors, receivers
+
+
+async def merge_smallest_teams(s, actor_tg_id: int, seed: int | None = None) -> dict:
+    """Расформировать самые малочисленные команды и раскинуть людей по остальным.
+
+    Выбор команды человеку не предлагается: попадает туда, где меньше народу, а при
+    равенстве — случайно. Так составы выравниваются, а не сваливаются в одну команду.
+    """
+    donors, receivers = await smallest_teams(s)
+    result = {"teams": [], "moved": [], "left": []}
+    if not donors:
+        return result
+
+    rnd = random.Random(seed)
+    people = [u for _, members in donors for u in members]
+    rnd.shuffle(people)
+    # Свободные места в командах-получателях, считаем по живому составу.
+    slots = {team.id: (team, settings.team_size - len(members)) for team, members in receivers}
+    for user in people:
+        free = [(team, n) for team, n in slots.values() if n > 0]
+        if not free:
+            result["left"].append(user)
+            continue
+        best = max(n for _, n in free)
+        candidates = [team for team, n in free if n == best]
+        target = rnd.choice(candidates)
+        old_team = next((t for t, members in donors if user in members), None)
+        user.team_id = target.id
+        slots[target.id] = (target, slots[target.id][1] - 1)
+        result["moved"].append({"user": user, "from": old_team.name if old_team else "—",
+                                "to": f"{target.emoji} {target.name}"})
+    await s.flush()
+
+    for team, _ in donors:
+        fresh = await team_active_count(s, team.id)
+        result["teams"].append(team.name)
+        if not fresh:
+            # Пустую команду убираем, чтобы она не мешала в списках и рейтинге.
+            await s.execute(delete(Team).where(Team.id == team.id))
+    await s.flush()
+    return result
 
 
 async def stuck_report(s, week: int | None = None) -> dict:

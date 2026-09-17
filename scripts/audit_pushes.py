@@ -233,6 +233,24 @@ async def main() -> None:
     await act(dp, bot, ADMIN, "adm:weekly")
     check("мотивация недели", USER)
 
+    print("\nМАССОВЫЕ ДЕЙСТВИЯ (/del)")
+    # Свежая команда из одного человека — её и должен расформировать бот.
+    async with SessionLocal() as s:
+        solo_team = await services.create_team(s, None, "Одиночки", "🐜")
+        big_team = await services.create_team(s, None, "Большая", "🐘")
+        await s.commit()
+        # Команде-получателю нужен состав побольше, иначе расформировывать не во что.
+        for tg in (USER, ADMIN, PC):
+            await services.move_user_to_team(s, await services.get_user(s, tg), big_team.id)
+        await services.move_user_to_team(s, await services.get_user(s, MATE), solo_team.id)
+        await s.commit()
+    sent.clear()
+    await act(dp, bot, ADMIN, "del", "del:merge", "del:merge_ok")
+    check("перевод при расформировании команды", MATE, "команде")
+    sent.clear()
+    await act(dp, bot, ADMIN, "del:inactive", "del:inactive_ok")
+    check("массовая дисквалификация", MATE)
+
     print("\nУДАЛЕНИЕ")
     sent.clear()
     await act(dp, bot, ADMIN, f"adm:del:{uid}", f"adm:del_ok:{uid}")
