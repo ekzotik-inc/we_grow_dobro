@@ -13,7 +13,8 @@ def check(ok, what):
     print(("  ✓ " if ok else "  ✗ ") + what)
     if not ok: bad.append(what)
 
-async def fill(s, sub, note="ок"):
+# Ответ должен пройти проверку на осмысленность: «ок» бот больше не принимает.
+async def fill(s, sub, note="Выполнил задание и приложил фото"):
     for i, st in enumerate(services.submission_steps(sub)):
         if st["kind"] == "note": await services.save_step_answer(s, sub, i, note)
         else: await services.add_file(s, sub, {"type":"photo","file_id":f"f{i}","name":None}, step=i)
