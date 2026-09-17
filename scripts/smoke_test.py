@@ -1197,6 +1197,33 @@ async def check_step_requirements() -> None:
     print("step requirements ok")
 
 
+def check_eco_announce() -> None:
+    """Анонс Eco Photo Assistant: ссылки внутри слов, кнопка-ссылка, лимит подписи."""
+    import re as _re
+
+    import app.keyboards as kbs
+    from app import emoji as em
+
+    text = texts.eco_agent_announce()
+    url = texts.ECO_AGENT_URL
+    # Ссылка стоит в словах, а не голым адресом в скобках.
+    assert f'<a href="{url}">Eco Photo Assistant</a>' in text
+    assert f'<a href="{url}">Подключить агента</a>' in text
+    assert "(https://" not in text, "адрес не должен торчать в скобках"
+    assert text.count("<a href=") >= 3, "ссылок должно быть несколько, как в оригинале"
+    # Добрик на месте и говорит последним.
+    assert "Добрик" in text and text.rstrip().endswith("</blockquote>")
+    # Уходит подписью к фото — лимит 1024 без учёта разметки.
+    plain = _re.sub(r"<[^>]+>", "", em.strip(text))
+    assert len(plain) <= 1024, len(plain)
+    # У кнопки — та же ссылка.
+    markup = kbs.eco_agent_kb()
+    links = [b for row in markup.inline_keyboard for b in row if b.url]
+    assert len(links) == 1 and links[0].url == url, links
+    assert "Подключить" in links[0].text
+    print("eco announce ok")
+
+
 def check_ready_screen() -> None:
     """Экран «всё готово» обязан отличаться от пройденных шагов: свой заголовок и одна зелёная кнопка."""
     import app.keyboards as kbs
@@ -1708,6 +1735,7 @@ async def main() -> None:
     await check_gallery()
     await check_nudges()
     await check_step_requirements()
+    check_eco_announce()
     check_ready_screen()
     await check_review_cards()
     await check_resubmission_resets()

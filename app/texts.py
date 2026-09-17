@@ -958,6 +958,32 @@ def db_expiry_warning() -> str | None:
     )
 
 
+# ---------- анонс корпоративного AI-помощника ----------
+
+ECO_AGENT_URL = ("https://m365.cloud.microsoft/chat/"
+                 "?titleId=T_0ffea211-7554-3c57-f175-9a710dc4a47c&source=embedded-builder")
+
+
+def eco_agent_announce() -> str:
+    """Анонс Eco Photo Assistant. Идёт подписью к фото, поэтому держимся в 1024 символах."""
+    link = f'<a href="{ECO_AGENT_URL}">Eco Photo Assistant</a>'
+    return (
+        f"🌿 <b>Знакомьтесь: {link}</b>\n"
+        "<i>эко-тимбилдинг · AI Champion Team &amp; P&amp;C</i>\n\n"
+        "Завтра мы сделаем доброе дело для природы — и сохраним лучшие моменты. "
+        f"Отправьте фотографию {link} прямо с телефона, и через несколько секунд она "
+        "будет готова к публикации.\n\n"
+        "✅ улучшит качество снимка\n"
+        "✅ уберёт лишние объекты и визуальный шум\n"
+        "✅ скроет автомобильные номера\n"
+        "✅ добавит фирменную эко-рамку\n"
+        "✅ подготовит фото к публикации\n\n"
+        f'<a href="{ECO_AGENT_URL}">Подключить агента</a> — на телефоне нужен 365 Copilot.\n\n'
+        + voice("Снимайте больше, не отвлекаясь на обработку: кадры пригодятся и для "
+                "отчётов по заданиям марафона.\nTogether for Nature 🌿 #ALL_IN")
+    )
+
+
 # ---------- массовая чистка (/del) ----------
 
 def cleanup_root(inactive: list, donors: list, receivers: list) -> str:

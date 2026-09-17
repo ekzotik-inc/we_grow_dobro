@@ -40,3 +40,9 @@ class ResultsFlow(StatesGroup):
     reason = State()      # за что — участник это увидит
     revoke_reason = State()
     search = State()
+
+
+class EcoAnnounce(StatesGroup):
+    """Загрузка картинки для анонса: файл хранится у Telegram, нам нужен только его id."""
+
+    photo = State()

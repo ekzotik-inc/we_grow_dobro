@@ -700,6 +700,7 @@ def announce_kb() -> InlineKeyboardMarkup:
     kb.row(_btn("💚 Мотивация недели", "adm:weekly"))
     kb.row(_btn("💡 Инструкция дня", "adm:howto"), _btn("🎯 Личные подсказки", "adm:nudge"))
     kb.row(_btn("🔍 Кто ещё не сдал", "adm:stuck"))
+    kb.row(_btn("🌿 Анонс Eco Photo Assistant", "adm:eco"))
     kb.row(_btn("⬅️ Панель", "adm"))
     return kb.as_markup()
 
@@ -721,6 +722,28 @@ def cleanup_confirm_kb(action: str) -> InlineKeyboardMarkup:
     kb = InlineKeyboardBuilder()
     kb.row(_btn("✅ Да, выполнить", f"del:{action}_ok", style="danger"))
     kb.row(_btn("⬅️ Отмена", "del"))
+    return kb.as_markup()
+
+
+def eco_agent_kb() -> InlineKeyboardMarkup:
+    """Кнопка-ссылка под анонсом: у ссылочных кнопок нет callback_data."""
+    kb = InlineKeyboardBuilder()
+    kb.row(InlineKeyboardButton(text="📸 Подключить агента", url=texts_eco_url()))
+    kb.row(_btn("📋 Задания недели", "tasks"), _btn("🏠 Меню", "menu"))
+    return kb.as_markup()
+
+
+def texts_eco_url() -> str:
+    from .texts import ECO_AGENT_URL
+
+    return ECO_AGENT_URL
+
+
+def eco_admin_kb(has_photo: bool) -> InlineKeyboardMarkup:
+    kb = InlineKeyboardBuilder()
+    kb.row(_btn("📤 Разослать всем участникам", "adm:eco_send", style="primary"))
+    kb.row(_btn("🖼 Заменить картинку" if has_photo else "🖼 Добавить картинку", "adm:eco_photo"))
+    kb.row(_btn("⬅️ Назад", "adm:announce"))
     return kb.as_markup()
 
 

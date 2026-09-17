@@ -18,7 +18,7 @@ from ...models import Broadcast, SubmissionStatus, UserStatus
 from .. import channels
 from ..channels import send_files
 from ..common import ANCHOR_KEY, answer_cq, delete_quietly, edit, edit_anchor, load_user, session
-from ..states import AdminFlow, TeamCreate
+from ..states import AdminFlow, EcoAnnounce, TeamCreate
 
 log = logging.getLogger(__name__)
 router = Router(name="admin")
@@ -623,15 +623,19 @@ async def team_new_emoji(cq: CallbackQuery, state: FSMContext) -> None:
 # ---------- announcements / broadcast ----------
 
 async def send_to_users(bot, s, users, text: str, kind: str, image: str | None = None,
-                        markup=None) -> int:
-    """Deliver a message to an explicit list of users, throttled below Telegram's limit."""
+                        markup=None, photo_id: str | None = None) -> int:
+    """Deliver a message to an explicit list of users, throttled below Telegram's limit.
+
+    photo_id — готовый file_id картинки, присланной владельцем: файла в репозитории нет,
+    а Telegram уже хранит изображение и раздаёт его по id сколько угодно раз.
+    """
     from ..common import photo_for, remember_photo
 
     n = 0
     buttons = markup or kb.back_kb("menu", "🏠 Меню")
     for u in users:
         try:
-            photo = photo_for(image)
+            photo = photo_id or photo_for(image)
             if photo is not None:
                 sent = await bot.send_photo(u.tg_id, photo, caption=text, reply_markup=buttons)
                 remember_photo(image, sent)
@@ -647,12 +651,12 @@ async def send_to_users(bot, s, users, text: str, kind: str, image: str | None =
 
 
 async def broadcast(bot, s, text: str, kind: str, user_filter=None, image: str | None = None,
-                    markup=None) -> int:
+                    markup=None, photo_id: str | None = None) -> int:
     """Send to all approved participants (optionally filtered). Used by announcements and the scheduler."""
     users = [u for u in await services.list_participants(s) if u.status == UserStatus.registered]
     if user_filter:
         users = [u for u in users if user_filter(u)]
-    return await send_to_users(bot, s, users, text, kind, image, markup)
+    return await send_to_users(bot, s, users, text, kind, image, markup, photo_id)
 
 
 @router.callback_query(F.data == "adm:announce")
@@ -694,6 +698,57 @@ async def cb_howto(cq: CallbackQuery) -> None:
                             markup=kb.push_kb())
     await edit(cq, f"💡 Инструкция «{texts.HOWTO[index % len(texts.HOWTO)][0]}» "
                    f"отправлена {n} участникам.", kb.back_kb("adm", "🛠 Панель"))
+
+
+ECO_PHOTO_KEY = "eco_announce_photo"
+
+
+@router.callback_query(F.data == "adm:eco")
+async def cb_eco(cq: CallbackQuery, state: FSMContext) -> None:
+    """Предпросмотр анонса Eco Photo Assistant — ровно в том виде, в каком он уйдёт людям."""
+    await state.clear()
+    async with session() as s:
+        photo_id = await services.get_setting(s, ECO_PHOTO_KEY)
+    await edit(cq, texts.eco_agent_announce(), kb.eco_admin_kb(bool(photo_id)))
+    if photo_id:
+        await answer_cq(cq, "Картинка загружена")
+    else:
+        await answer_cq(cq, "Картинки пока нет — анонс уйдёт текстом", alert=True)
+
+
+@router.callback_query(F.data == "adm:eco_photo")
+async def cb_eco_photo(cq: CallbackQuery, state: FSMContext) -> None:
+    await state.set_state(EcoAnnounce.photo)
+    await state.update_data({ANCHOR_KEY: cq.message.message_id})
+    await edit(cq, "🖼 <b>Пришлите картинку анонса</b> следующим сообщением.\n\n"
+                   "<i>Файл останется у Telegram — в рассылку он подставится сам.</i>",
+               kb.cancel_kb("adm:eco"))
+    await answer_cq(cq)
+
+
+@router.message(EcoAnnounce.photo, F.photo | F.document)
+async def eco_photo_saved(message: Message, state: FSMContext) -> None:
+    file_id = message.photo[-1].file_id if message.photo else message.document.file_id
+    async with session() as s:
+        await services.set_setting(s, ECO_PHOTO_KEY, file_id)
+        await s.commit()
+    await state.clear()
+    await delete_quietly(message)
+    await message.answer_photo(file_id, caption=texts.eco_agent_announce(),
+                               reply_markup=kb.eco_admin_kb(True))
+
+
+@router.callback_query(F.data == "adm:eco_send")
+async def cb_eco_send(cq: CallbackQuery) -> None:
+    await answer_cq(cq, "Рассылаю…")
+    async with session() as s:
+        photo_id = await services.get_setting(s, ECO_PHOTO_KEY)
+        n = await broadcast(cq.bot, s, texts.eco_agent_announce(),
+                            f"eco_agent:{settings.today().isoformat()}",
+                            markup=kb.eco_agent_kb(), photo_id=photo_id)
+    await edit(cq, f"🌿 Анонс Eco Photo Assistant отправлен {n} участникам"
+                   + ("." if photo_id else " (без картинки)."),
+               kb.back_kb("adm", "🛠 Панель"))
 
 
 @router.callback_query(F.data == "adm:stuck")
