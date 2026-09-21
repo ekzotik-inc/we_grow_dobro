@@ -125,6 +125,8 @@ class Settings:
     week_open_time: str = os.getenv("WEEK_OPEN_TIME", "00:01").strip()
     last_call_hour: int = int(os.getenv("LAST_CALL_HOUR", "19"))  # «последний рывок» в финальный день
     # Кнопка Eco Photo Assistant в главном меню живёт ровно сутки и гаснет сама.
+    # Когда разослать сотрудникам итоги опроса. Пусто — не рассылать.
+    survey_report_at: str = os.getenv("SURVEY_REPORT_AT", "2026-09-22 09:00").strip()
     eco_banner_from: str = os.getenv("ECO_BANNER_FROM", "2026-09-17 22:22").strip()
     eco_banner_until: str = os.getenv("ECO_BANNER_UNTIL", "2026-09-18 22:22").strip()
     howto_hour: int = int(os.getenv("HOWTO_HOUR", "12"))
@@ -198,6 +200,9 @@ class Settings:
                 continue
         log.warning("Не понял время показа баннера: %r", raw)
         return None
+
+    def survey_report_moment(self):
+        return self._moment(self.survey_report_at)
 
     def eco_banner_visible(self) -> bool:
         """Идут ли сейчас те самые сутки, когда кнопка видна в меню."""

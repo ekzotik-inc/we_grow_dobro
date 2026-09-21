@@ -79,6 +79,8 @@ services:
         value: "16"
       - key: LAST_CALL_HOUR    # час напоминания «последний рывок» в финальный день недели
         value: "19"
+      - key: SURVEY_REPORT_AT  # когда сотрудники получат итоги опроса
+        value: "2026-09-22 09:00"
       - key: ECO_BANNER_FROM   # появление кнопки Eco Photo Assistant в меню
         value: "2026-09-17 22:22"
       - key: ECO_BANNER_UNTIL  # кнопка гаснет сама; пусто — не показывать вовсе

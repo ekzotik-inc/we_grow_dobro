@@ -120,6 +120,35 @@ async def last_call_job(bot: Bot, force: bool = False) -> int:
     return sent
 
 
+async def survey_report_job(bot: Bot) -> None:
+    """Итоги опроса — админу и сотрудникам P&C, один раз в назначенное время."""
+    moment = settings.survey_report_moment()
+    if moment is None:
+        return
+    now = settings.now()
+    if now < moment or (now - moment).total_seconds() > 3600:
+        # Задача просыпается ежечасно: шлём в ближайший после назначенного времени час.
+        return
+    async with SessionLocal() as s:
+        kind = f"survey_report:{services.SURVEY_CODE}:{moment:%Y-%m-%d %H:%M}"
+        if await _already_sent(s, kind):
+            return
+        report = await services.survey_report(s)
+        parts = texts.survey_report(report)
+        staff = sorted(set(await services.list_admin_tg_ids(s)) | settings.admin_ids | settings.pc_ids)
+        sent = 0
+        for tg_id in staff:
+            try:
+                for part in parts:
+                    await bot.send_message(tg_id, part)
+                sent += 1
+            except Exception as ex:  # noqa: BLE001
+                log.warning("итоги опроса не ушли %s: %s", tg_id, ex)
+        s.add(Broadcast(kind=kind, recipients=sent))
+        await s.commit()
+    log.info("итоги опроса отправлены %s сотрудникам", sent)
+
+
 async def close_week_job(bot: Bot) -> None:
     """Закрыть неделю в её последний день: после этого отчёты не принимаются."""
     if not settings.auto_weeks:
@@ -303,6 +332,9 @@ def build_scheduler(bot: Bot) -> AsyncIOScheduler:
     close_h, close_m = settings.close_at
     open_h, open_m = settings.open_at
     sch.add_job(last_call_job, CronTrigger(hour=settings.last_call_hour, minute=0), args=[bot], id="lastcall")
+    # Отчёт по опросу — разовый, но задача проверяется каждый час: так он уйдёт даже если
+    # сервис в назначенную минуту перезапускался.
+    sch.add_job(survey_report_job, CronTrigger(minute=1), args=[bot], id="survey_report")
     sch.add_job(close_week_job, CronTrigger(hour=close_h, minute=close_m), args=[bot], id="week_close")
     sch.add_job(open_week_job, CronTrigger(hour=open_h, minute=open_m), args=[bot], id="week_open")
     log.info("смена недель: %s — закрытие, %s — открытие, автоматически: %s",

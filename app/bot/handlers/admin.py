@@ -751,6 +751,44 @@ async def cb_eco_send(cq: CallbackQuery) -> None:
                kb.back_kb("adm", "🛠 Панель"))
 
 
+@router.callback_query(F.data == "adm:survey")
+async def cb_survey(cq: CallbackQuery) -> None:
+    """Опрос про награды: предпросмотр первого вопроса и текущий охват."""
+    async with session() as s:
+        report = await services.survey_report(s)
+    text = (f"📊 <b>Опрос про награды</b>\n"
+            f"<i>прошли: {len(report['finished'])} из {report['invited']} · "
+            f"начали и не закончили: {len(report['partial'])}</i>\n\n"
+            "Уйдёт отдельным сообщением, с главным меню не связан:\n\n"
+            + texts.survey_question(services.SURVEY_ORDER[0], 1, len(services.SURVEY_ORDER)))
+    await edit(cq, text, kb.survey_admin_kb())
+    await answer_cq(cq)
+
+
+@router.callback_query(F.data == "adm:survey_send")
+async def cb_survey_send(cq: CallbackQuery) -> None:
+    await answer_cq(cq, "Рассылаю опрос…")
+    code = services.SURVEY_ORDER[0]
+    async with session() as s:
+        n = await broadcast(cq.bot, s,
+                            texts.survey_question(code, 1, len(services.SURVEY_ORDER)),
+                            f"survey:{services.SURVEY_CODE}:{settings.now():%Y-%m-%d %H:%M}",
+                            markup=kb.survey_kb(code))
+    await edit(cq, f"📊 Опрос отправлен {n} участникам.", kb.back_kb("adm:survey", "📊 Опрос"))
+
+
+@router.callback_query(F.data == "adm:survey_report")
+async def cb_survey_report(cq: CallbackQuery) -> None:
+    """Итоги опроса — только сотрудникам: роутер уже закрыт фильтром IsAdmin."""
+    async with session() as s:
+        report = await services.survey_report(s)
+    parts = texts.survey_report(report)
+    await edit(cq, parts[0], kb.back_kb("adm:survey", "📊 Опрос"))
+    for extra in parts[1:]:
+        await cq.message.answer(extra)
+    await answer_cq(cq)
+
+
 @router.callback_query(F.data == "adm:stuck")
 async def cb_stuck(cq: CallbackQuery) -> None:
     """Кто ещё не сдал и на каком шаге застрял."""

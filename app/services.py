@@ -9,7 +9,8 @@ from sqlalchemy import delete, func, select
 from sqlalchemy.orm import selectinload
 
 from .config import settings
-from .models import AppSetting, PointsLog, Submission, SubmissionStatus, Task, Team, User, UserStatus
+from .models import (AppSetting, PointsLog, Submission, SubmissionStatus, SurveyAnswer,
+                     Task, Team, User, UserStatus)
 
 
 class ServiceError(Exception):
@@ -1142,6 +1143,94 @@ async def nudge_for_user(s, user: User) -> tuple[str, dict] | None:
     return "almost", {**base, "done": len(sent), "total": total,
                       "left_tasks": len(rest),
                       "possible": sum(max((o.points for o in t.options), default=t.points) for t in rest)}
+
+
+# ---------- опросы ----------
+
+SURVEY_CODE = "reward2026"
+SURVEY_QUESTIONS = {
+    "gender": {
+        "title": "Выберите ваш пол",
+        "options": [("male", "Мужской"), ("female", "Женский")],
+    },
+    "psy": {
+        "title": "Насколько актуальна консультация психолога как вознаграждение?",
+        "options": [("yes", "Актуально"), ("no", "Не актуально")],
+    },
+}
+SURVEY_ORDER = ("gender", "psy")
+
+
+async def survey_answers_of(s, user_id: int, survey: str = SURVEY_CODE) -> dict[str, str]:
+    rows = await s.execute(
+        select(SurveyAnswer).where(SurveyAnswer.user_id == user_id, SurveyAnswer.survey == survey)
+    )
+    return {x.question: x.answer for x in rows.scalars()}
+
+
+async def save_survey_answer(s, user: User, question: str, answer: str,
+                             survey: str = SURVEY_CODE) -> None:
+    """Записать ответ. Повторное нажатие просто меняет выбор, а не плодит строки."""
+    if question not in SURVEY_QUESTIONS:
+        raise ServiceError("Неизвестный вопрос.")
+    if answer not in dict(SURVEY_QUESTIONS[question]["options"]):
+        raise ServiceError("Неизвестный вариант ответа.")
+    row = (await s.execute(
+        select(SurveyAnswer).where(SurveyAnswer.user_id == user.id,
+                                   SurveyAnswer.survey == survey,
+                                   SurveyAnswer.question == question)
+    )).scalar_one_or_none()
+    if row is None:
+        row = SurveyAnswer(user_id=user.id, survey=survey, question=question)
+        s.add(row)
+    row.answer = answer
+    await s.flush()
+
+
+def survey_next_question(answers: dict[str, str]) -> str | None:
+    """Следующий вопрос: второй показывается только после ответа на первый."""
+    for code in SURVEY_ORDER:
+        if code not in answers:
+            return code
+    return None
+
+
+async def survey_report(s, survey: str = SURVEY_CODE) -> dict:
+    """Сводка по опросу: кто ответил, что выбрал, и разрезы для анализа."""
+    rows = list((await s.execute(
+        select(SurveyAnswer).options(selectinload(SurveyAnswer.user).selectinload(User.team))
+        .where(SurveyAnswer.survey == survey)
+        .order_by(SurveyAnswer.created_at)
+    )).scalars())
+
+    people: dict[int, dict] = {}
+    for row in rows:
+        item = people.setdefault(row.user_id, {"user": row.user, "answers": {}, "at": row.created_at})
+        item["answers"][row.question] = row.answer
+        item["at"] = min(item["at"], row.created_at) if item["at"] else row.created_at
+
+    invited = [u for u in await list_participants(s) if u.status == UserStatus.registered]
+    finished = [x for x in people.values() if survey_next_question(x["answers"]) is None]
+    partial = [x for x in people.values() if survey_next_question(x["answers"]) is not None]
+
+    cross: dict[tuple[str, str], int] = {}
+    by_gender: dict[str, int] = {}
+    by_psy: dict[str, int] = {}
+    for item in finished:
+        g, psy = item["answers"]["gender"], item["answers"]["psy"]
+        cross[(g, psy)] = cross.get((g, psy), 0) + 1
+        by_gender[g] = by_gender.get(g, 0) + 1
+        by_psy[psy] = by_psy.get(psy, 0) + 1
+
+    return {
+        "survey": survey,
+        "invited": len(invited),
+        "finished": sorted(finished, key=lambda x: x["user"].display_name.lower()),
+        "partial": sorted(partial, key=lambda x: x["user"].display_name.lower()),
+        "by_gender": by_gender,
+        "by_psy": by_psy,
+        "cross": cross,
+    }
 
 
 # ---------- массовая чистка (/del, только владелец) ----------

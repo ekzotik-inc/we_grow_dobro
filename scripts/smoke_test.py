@@ -768,6 +768,114 @@ async def check_disqualified_blocked() -> None:
     print("disqualified blocked ok")
 
 
+async def check_survey() -> None:
+    """Опрос: второй вопрос только после первого, ответы переписываются, отчёт считает разрезы."""
+    import datetime
+
+    from app import scheduler as sched
+    from app.config import settings as cfg
+
+    async with SessionLocal() as s:
+        people = []
+        for i, (gender, psy) in enumerate([("male", "yes"), ("male", "no"),
+                                           ("female", "yes"), ("female", "yes")]):
+            u = await services.get_or_create_user(s, 9800 + i, f"poll{i}")
+            await services.register_user(s, u, f"Опрошенный {i} Иванов", "IT", "Ташкент")
+            await services.approve_user(s, u, 999)
+            await s.commit()
+            people.append((u, gender, psy))
+
+        first, gender, psy = people[0]
+        # Пока нет ответа на первый вопрос, следующий — именно он.
+        assert services.survey_next_question({}) == "gender"
+        assert services.survey_next_question({"gender": "male"}) == "psy"
+        assert services.survey_next_question({"gender": "male", "psy": "no"}) is None
+
+        # Чужие коды не принимаются.
+        for bad in (("gender", "other"), ("age", "30")):
+            try:
+                await services.save_survey_answer(s, first, *bad)
+                raise AssertionError(f"принят неверный ответ {bad}")
+            except services.ServiceError:
+                pass
+
+        for u, g, p_ in people:
+            await services.save_survey_answer(s, u, "gender", g)
+            await services.save_survey_answer(s, u, "psy", p_)
+        await s.commit()
+        # Ответ можно поменять, строка не задваивается.
+        await services.save_survey_answer(s, first, "psy", "no")
+        await s.commit()
+        answers = await services.survey_answers_of(s, first.id)
+        assert answers == {"gender": "male", "psy": "no"}, answers
+
+        # Незаконченный ответ виден отдельно.
+        half, _, _ = people[3]
+        partial_user = await services.get_or_create_user(s, 9899, "half")
+        await services.register_user(s, partial_user, "Недоответивший Петров", "IT", "Ташкент")
+        await services.approve_user(s, partial_user, 999)
+        await services.save_survey_answer(s, partial_user, "gender", "female")
+        await s.commit()
+
+        report = await services.survey_report(s)
+        assert len(report["finished"]) == 4, report["by_gender"]
+        assert len(report["partial"]) == 1
+        assert report["by_gender"] == {"male": 2, "female": 2}, report["by_gender"]
+        assert report["by_psy"]["yes"] == 2 and report["by_psy"]["no"] == 2, report["by_psy"]
+        assert report["cross"][("female", "yes")] == 2
+        assert report["invited"] >= 5
+
+        parts = texts.survey_report(report)
+        joined = "\n".join(parts)
+        assert all(len(p_) <= 4096 for p_ in parts), [len(p_) for p_ in parts]
+        assert "Итоги опроса" in parts[0] and "ОХВАТ" in parts[0]
+        assert "ПО ПОЛУ" in parts[0] and "РАЗРЕЗ" in parts[0] and "ЧТО ИЗ ЭТОГО СЛЕДУЕТ" in parts[0]
+        # Поимённо: каждый ответивший и его выбор.
+        for u, g, _ in people:
+            assert u.display_name in joined, u.display_name
+        assert "Недоответивший Петров" in joined
+        assert "Мужской" in joined and "Актуально" in joined
+
+        # Экраны участника.
+        q1 = texts.survey_question("gender", 1, 2)
+        assert "Выберите ваш пол" in q1 and "вопрос 1 из 2" in q1
+        q2 = texts.survey_question("psy", 2, 2)
+        assert "психолог" in q2.lower()
+        done = texts.survey_done({"gender": "male", "psy": "no"})
+        assert "Спасибо" in done and "Не актуально" in done
+        assert all(len(x) <= 4096 for x in (q1, q2, done))
+
+        # Клавиатура: выбранный вариант отмечен.
+        import app.keyboards as kbs
+        flat = [b for row in kbs.survey_kb("gender", "male").inline_keyboard for b in row]
+        assert len(flat) == 2 and any(b.style == "success" for b in flat)
+
+        # Отчёт по расписанию: до назначенного часа не уходит, в свой час — уходит один раз.
+        sent_to = []
+
+        class FakeBot:
+            async def send_message(self, chat_id, text, **kw):
+                sent_to.append(chat_id)
+
+        original_now = cfg.now
+        moment = cfg.survey_report_moment()
+        try:
+            cfg.now = lambda: moment - datetime.timedelta(minutes=5)
+            await sched.survey_report_job(FakeBot())
+            assert not sent_to, "отчёт ушёл раньше времени"
+            cfg.now = lambda: moment + datetime.timedelta(minutes=5)
+            await sched.survey_report_job(FakeBot())
+            assert sent_to, "отчёт не ушёл в назначенное время"
+            staff = set(settings.admin_ids) | set(settings.pc_ids)
+            assert staff <= set(sent_to), (staff, set(sent_to))
+            before = len(sent_to)
+            await sched.survey_report_job(FakeBot())
+            assert len(sent_to) == before, "отчёт ушёл повторно"
+        finally:
+            cfg.now = original_now
+    print("survey ok")
+
+
 async def check_cleanup() -> None:
     """/del: массовая дисквалификация неактивных и перетасовка малочисленных команд."""
     async with SessionLocal() as s:
@@ -1809,6 +1917,7 @@ async def main() -> None:
     await check_manual_results()
     await check_team_moves()
     await check_disqualified_blocked()
+    await check_survey()
     await check_cleanup()
     await check_week_switch_schedule()
     await check_stuck_report()

@@ -200,6 +200,27 @@ class AppSetting(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now(), onupdate=func.now())
 
 
+class SurveyAnswer(Base):
+    """Ответ на опрос. Одна строка — один вопрос одного человека.
+
+    Хранится отдельно от анкеты участника: опрос живёт своей жизнью, его можно повторить
+    с другими вопросами, не трогая профиль.
+    """
+
+    __tablename__ = "survey_answers"
+    __table_args__ = (UniqueConstraint("user_id", "survey", "question", name="uq_survey_answer"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    survey: Mapped[str] = mapped_column(String(40), index=True)   # код опроса
+    question: Mapped[str] = mapped_column(String(40))             # код вопроса
+    answer: Mapped[str] = mapped_column(String(60))               # код ответа
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now(), onupdate=func.now())
+
+    user: Mapped[User] = relationship()
+
+
 class Broadcast(Base):
     __tablename__ = "broadcasts"
 

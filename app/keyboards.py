@@ -706,6 +706,7 @@ def announce_kb() -> InlineKeyboardMarkup:
     kb.row(_btn("🔍 Кто ещё не сдал", "adm:stuck"))
     kb.row(_btn("🌿 Анонс Eco Photo Assistant", "adm:eco"))
     kb.row(_btn("🤫 Извинение от Добрика", "adm:sorry"))
+    kb.row(_btn("📊 Опрос про награды", "adm:survey"))
     kb.row(_btn("⬅️ Панель", "adm"))
     return kb.as_markup()
 
@@ -749,6 +750,33 @@ def eco_admin_kb(has_photo: bool) -> InlineKeyboardMarkup:
     kb.row(_btn("📤 Разослать всем участникам", "adm:eco_send", style="primary"))
     kb.row(_btn("🖼 Заменить картинку" if has_photo else "🖼 Добавить картинку", "adm:eco_photo"))
     kb.row(_btn("⬅️ Назад", "adm:announce"))
+    return kb.as_markup()
+
+
+def survey_kb(code: str, chosen: str | None = None) -> InlineKeyboardMarkup:
+    """Варианты ответа. Выбранный помечается галочкой — видно, что нажатие засчитано."""
+    from .services import SURVEY_QUESTIONS
+
+    kb = InlineKeyboardBuilder()
+    for value, label in SURVEY_QUESTIONS[code]["options"]:
+        mark = "✅ " if chosen == value else ""
+        kb.row(_btn(f"{mark}{label}", f"sv:{code}:{value}",
+                    style="success" if chosen == value else None))
+    return kb.as_markup()
+
+
+def survey_done_kb() -> InlineKeyboardMarkup:
+    kb = InlineKeyboardBuilder()
+    kb.row(_btn("🔄 Изменить ответы", "sv:restart"))
+    kb.row(_btn("🏠 Меню", "menu"))
+    return kb.as_markup()
+
+
+def survey_admin_kb() -> InlineKeyboardMarkup:
+    kb = InlineKeyboardBuilder()
+    kb.row(_btn("📤 Разослать опрос", "adm:survey_send", style="primary"))
+    kb.row(_btn("📈 Итоги опроса", "adm:survey_report"))
+    kb.row(_btn("⬅️ Панель", "adm"))
     return kb.as_markup()
 
 

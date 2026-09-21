@@ -1010,6 +1010,156 @@ def db_expiry_warning() -> str | None:
     )
 
 
+# ---------- опрос ----------
+
+def survey_question(code: str, index: int, total: int) -> str:
+    """Экран вопроса. Опрос живёт отдельным сообщением и не зависит от главного меню."""
+    from . import services
+
+    q = services.SURVEY_QUESTIONS[code]
+    lines = ["📊 <b>Короткий опрос</b>", f"<i>вопрос {index} из {total} · ответ займёт секунду</i>",
+             "", HR, f"<b>{e(q['title'])}</b>", HR, ""]
+    if index == 1:
+        lines.append(voice("Мы выбираем, чем награждать участников, и нам важно ваше мнение. "
+                           "Два вопроса — и всё."))
+    else:
+        lines.append(voice("Остался последний вопрос — и я вас отпускаю."))
+    return "\n".join(lines)
+
+
+def survey_done(answers: dict[str, str]) -> str:
+    """Спасибо после последнего вопроса — с тем, что человек выбрал."""
+    from . import services
+
+    lines = [f"{px('heart')} <b>Спасибо! Ответы записаны</b>", ""]
+    for code in services.SURVEY_ORDER:
+        q = services.SURVEY_QUESTIONS[code]
+        chosen = dict(q["options"]).get(answers.get(code, ""), "—")
+        lines.append(row("•", q["title"], e(chosen)))
+    lines.append("")
+    lines.append(voice("Ответы видит только P&C, и они помогут выбрать награды, "
+                       "которые правда нужны.\nПередумали — просто нажмите кнопку ещё раз."))
+    return "\n".join(lines)
+
+
+def survey_report(report: dict) -> list[str]:
+    """Отчёт по опросу для P&C. Возвращает части: список людей может не влезть в сообщение."""
+    from . import services
+
+    finished, partial = report["finished"], report["partial"]
+    invited = report["invited"] or 0
+    share = round(len(finished) * 100 / invited) if invited else 0
+    g_labels = dict(services.SURVEY_QUESTIONS["gender"]["options"])
+    p_labels = dict(services.SURVEY_QUESTIONS["psy"]["options"])
+
+    head = ["📊 <b>Итоги опроса</b>", "<i>пол · актуальность консультации психолога</i>", "",
+            section("📈 ОХВАТ"),
+            row("👥", "Участников в марафоне", str(invited)),
+            row("✅", "Прошли опрос полностью", f"{len(finished)}", f"{share}%"),
+            row("⏳", "Начали и не закончили", str(len(partial))),
+            row("💤", "Не открывали", str(max(invited - len(finished) - len(partial), 0)))]
+
+    if finished:
+        head += ["", section("👥 ПО ПОЛУ")]
+        for code, label in services.SURVEY_QUESTIONS["gender"]["options"]:
+            n = report["by_gender"].get(code, 0)
+            pct = round(n * 100 / len(finished)) if finished else 0
+            head.append(row("•", label, str(n), f"{pct}%"))
+
+        head += ["", section("🧠 КОНСУЛЬТАЦИЯ ПСИХОЛОГА")]
+        for code, label in services.SURVEY_QUESTIONS["psy"]["options"]:
+            n = report["by_psy"].get(code, 0)
+            pct = round(n * 100 / len(finished)) if finished else 0
+            head.append(row("•", label, str(n), f"{pct}%"))
+
+        head += ["", section("🔎 РАЗРЕЗ: ПОЛ × ОТВЕТ")]
+        for g_code, g_label in services.SURVEY_QUESTIONS["gender"]["options"]:
+            total_g = report["by_gender"].get(g_code, 0)
+            if not total_g:
+                head.append(f"<b>{e(g_label)}</b>: ответов нет")
+                continue
+            yes = report["cross"].get((g_code, "yes"), 0)
+            pct = round(yes * 100 / total_g)
+            head.append(f"<b>{e(g_label)}</b> ({total_g}): актуально — {yes} ({pct}%), "
+                        f"не актуально — {total_g - yes}")
+
+        head += ["", section("💡 ЧТО ИЗ ЭТОГО СЛЕДУЕТ")]
+        head.append(_survey_insight(report, len(finished)))
+
+    parts = ["\n".join(head)]
+
+    if finished:
+        rows = [section("👤 КТО И ЧТО ОТВЕТИЛ")]
+        for item in finished:
+            u = item["user"]
+            team = f" · {e(u.team.emoji)} {e(u.team.name)}" if u.team else ""
+            g = g_labels.get(item["answers"].get("gender", ""), "—")
+            psy = p_labels.get(item["answers"].get("psy", ""), "—")
+            rows.append(f"• <b>{e(u.display_name)}</b>{team}\n  {e(g)} · психолог: {e(psy)}")
+        parts += _chunks(rows)
+    if partial:
+        rows = [section("⏳ НАЧАЛИ, НО НЕ ЗАКОНЧИЛИ")]
+        for item in partial:
+            u = item["user"]
+            g = g_labels.get(item["answers"].get("gender", ""), "—")
+            rows.append(f"• {e(u.display_name)} — {e(g)}, второй вопрос без ответа")
+        parts += _chunks(rows)
+    return parts
+
+
+def _survey_insight(report: dict, finished: int) -> str:
+    """Короткий вывод словами — чтобы отчёт не пришлось расшифровывать самому."""
+    from . import services
+
+    yes = report["by_psy"].get("yes", 0)
+    share = round(yes * 100 / finished) if finished else 0
+    g_labels = dict(services.SURVEY_QUESTIONS["gender"]["options"])
+    lines = []
+    if share >= 60:
+        lines.append(f"Консультация психолога востребована: её выбрали {share}% ответивших — "
+                     "награду стоит оставить в списке.")
+    elif share >= 30:
+        lines.append(f"Мнения разделились: актуально для {share}%. "
+                     "Имеет смысл предложить её как один из вариантов на выбор, а не единственный.")
+    else:
+        lines.append(f"Спрос низкий: всего {share}% считают это актуальным — "
+                     "лучше поискать другую награду.")
+
+    rates = {}
+    for code in ("male", "female"):
+        total_g = report["by_gender"].get(code, 0)
+        if total_g:
+            rates[code] = round(report["cross"].get((code, "yes"), 0) * 100 / total_g)
+    if len(rates) == 2:
+        top = max(rates, key=rates.get)
+        low = min(rates, key=rates.get)
+        gap = rates[top] - rates[low]
+        if gap >= 20:
+            lines.append(f"Разрыв по полу заметный: {e(g_labels[top])} — {rates[top]}%, "
+                         f"{e(g_labels[low])} — {rates[low]}%.")
+        else:
+            lines.append("По полу ответы почти не различаются — награда одинаково заходит обеим группам.")
+    if report["partial"]:
+        lines.append(f"{len(report['partial'])} человек бросили опрос на втором вопросе — "
+                     "им стоит напомнить.")
+    return "\n".join(lines)
+
+
+def _chunks(rows: list[str], limit: int = 3500) -> list[str]:
+    """Разбить длинный список на сообщения, не разрывая строку пополам."""
+    out, current = [], []
+    size = 0
+    for row_text in rows:
+        if size + len(row_text) > limit and current:
+            out.append("\n".join(current))
+            current, size = [], 0
+        current.append(row_text)
+        size += len(row_text) + 1
+    if current:
+        out.append("\n".join(current))
+    return out
+
+
 # ---------- анонс корпоративного AI-помощника ----------
 
 ECO_AGENT_URL = ("https://m365.cloud.microsoft/chat/"
