@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import asyncio
 import os
+from pathlib import Path
 
 os.environ.setdefault("BOT_TOKEN", "123:test-token")
 os.environ.setdefault("DATABASE_URL", "sqlite+aiosqlite:///./data/smoke.db")
@@ -850,12 +851,40 @@ async def check_survey() -> None:
         flat = [b for row in kbs.survey_kb("gender", "male").inline_keyboard for b in row]
         assert len(flat) == 2 and any(b.style == "success" for b in flat)
 
+        # Список поимённо — одной строкой на человека, иначе отчёт нечитаем.
+        people_part = next(p_ for p_ in parts if "КТО И ЧТО ОТВЕТИЛ" in p_)
+        person_lines = [x for x in people_part.splitlines() if x.startswith(("✅", "❌"))]
+        assert len(person_lines) == len(report["finished"]), person_lines
+        assert all(" · " in x for x in person_lines)
+        assert "Excel" in parts[-1], "в отчёте должно быть сказано про файл"
+
+        # Excel: три листа и строка на каждого ответившего.
+        import openpyxl
+
+        from app.export import export_survey_xlsx
+
+        path = await export_survey_xlsx(s, Path("data/export/test_survey.xlsx"))
+        wb = openpyxl.load_workbook(path)
+        assert wb.sheetnames == ["Ответы", "Сводка", "Пол × ответ"], wb.sheetnames
+        answers_sheet = list(wb["Ответы"].iter_rows(values_only=True))
+        assert answers_sheet[0][0] == "ФИО" and "Команда" in answers_sheet[0]
+        assert len(answers_sheet) - 1 == len(report["finished"]) + len(report["partial"])
+        names = {r[0] for r in answers_sheet[1:]}
+        assert "Недоответивший Петров" in names
+        statuses = {r[6] for r in answers_sheet[1:]}
+        assert statuses == {"полностью", "не закончил"}, statuses
+        path.unlink()
+
         # Отчёт по расписанию: до назначенного часа не уходит, в свой час — уходит один раз.
         sent_to = []
+        files = []
 
         class FakeBot:
             async def send_message(self, chat_id, text, **kw):
                 sent_to.append(chat_id)
+
+            async def send_document(self, chat_id, document, **kw):
+                files.append(chat_id)
 
         original_now = cfg.now
         moment = cfg.survey_report_moment()
@@ -866,6 +895,7 @@ async def check_survey() -> None:
             cfg.now = lambda: moment + datetime.timedelta(minutes=5)
             await sched.survey_report_job(FakeBot())
             assert sent_to, "отчёт не ушёл в назначенное время"
+            assert files, "к отчёту должен прикладываться файл Excel"
             staff = set(settings.admin_ids) | set(settings.pc_ids)
             assert staff <= set(sent_to), (staff, set(sent_to))
             before = len(sent_to)

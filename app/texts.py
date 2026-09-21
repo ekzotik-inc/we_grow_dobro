@@ -1049,9 +1049,6 @@ def survey_report(report: dict) -> list[str]:
     finished, partial = report["finished"], report["partial"]
     invited = report["invited"] or 0
     share = round(len(finished) * 100 / invited) if invited else 0
-    g_labels = dict(services.SURVEY_QUESTIONS["gender"]["options"])
-    p_labels = dict(services.SURVEY_QUESTIONS["psy"]["options"])
-
     head = ["📊 <b>Итоги опроса</b>", "<i>пол · актуальность консультации психолога</i>", "",
             section("📈 ОХВАТ"),
             row("👥", "Участников в марафоне", str(invited)),
@@ -1088,22 +1085,29 @@ def survey_report(report: dict) -> list[str]:
 
     parts = ["\n".join(head)]
 
+    # Поимённо — одной строкой на человека: две строки на каждого читать невозможно.
+    # Полная таблица с отделами и временем ответа уходит отдельным файлом Excel.
     if finished:
-        rows = [section("👤 КТО И ЧТО ОТВЕТИЛ")]
+        rows = [section("👤 КТО И ЧТО ОТВЕТИЛ"),
+                "<i>М/Ж · ✅ психолог актуален · ❌ не актуален</i>", ""]
         for item in finished:
             u = item["user"]
-            team = f" · {e(u.team.emoji)} {e(u.team.name)}" if u.team else ""
-            g = g_labels.get(item["answers"].get("gender", ""), "—")
-            psy = p_labels.get(item["answers"].get("psy", ""), "—")
-            rows.append(f"• <b>{e(u.display_name)}</b>{team}\n  {e(g)} · психолог: {e(psy)}")
+            answers = item["answers"]
+            mark = "✅" if answers.get("psy") == "yes" else "❌"
+            sex = "М" if answers.get("gender") == "male" else "Ж"
+            team = f" · {e(u.team.name)}" if u.team else ""
+            rows.append(f"{mark} {sex} · <b>{e(u.display_name)}</b>{team}")
         parts += _chunks(rows)
     if partial:
-        rows = [section("⏳ НАЧАЛИ, НО НЕ ЗАКОНЧИЛИ")]
+        rows = [section("⏳ НАЧАЛИ, НО НЕ ЗАКОНЧИЛИ"),
+                "<i>ответили на пол, второй вопрос пропустили</i>", ""]
         for item in partial:
             u = item["user"]
-            g = g_labels.get(item["answers"].get("gender", ""), "—")
-            rows.append(f"• {e(u.display_name)} — {e(g)}, второй вопрос без ответа")
+            sex = "М" if item["answers"].get("gender") == "male" else "Ж"
+            rows.append(f"⏳ {sex} · {e(u.display_name)}")
         parts += _chunks(rows)
+    parts[-1] += "\n\n" + voice("Полная таблица — в файле Excel: там отделы, команды и время "
+                                 "ответа, можно фильтровать и считать своё.")
     return parts
 
 
@@ -1140,8 +1144,9 @@ def _survey_insight(report: dict, finished: int) -> str:
         else:
             lines.append("По полу ответы почти не различаются — награда одинаково заходит обеим группам.")
     if report["partial"]:
-        lines.append(f"{len(report['partial'])} человек бросили опрос на втором вопросе — "
-                     "им стоит напомнить.")
+        n = len(report["partial"])
+        lines.append(f"{n} {plural(n, 'человек бросил', 'человека бросили', 'человек бросили')} "
+                     "опрос на втором вопросе — им стоит напомнить.")
     return "\n".join(lines)
 
 

@@ -13,7 +13,7 @@ from aiogram.types import CallbackQuery, FSInputFile, Message
 from ... import keyboards as kb
 from ... import services, texts
 from ...config import settings
-from ...export import export_xlsx
+from ...export import export_survey_xlsx, export_xlsx
 from ...models import Broadcast, SubmissionStatus, UserStatus
 from .. import channels
 from ..channels import send_files
@@ -786,7 +786,20 @@ async def cb_survey_report(cq: CallbackQuery) -> None:
     await edit(cq, parts[0], kb.back_kb("adm:survey", "📊 Опрос"))
     for extra in parts[1:]:
         await cq.message.answer(extra)
+    async with session() as s:
+        path = await export_survey_xlsx(s, Path("data/export/survey.xlsx"))
+    await cq.message.answer_document(FSInputFile(path, filename="opros_nagrady.xlsx"))
     await answer_cq(cq)
+
+
+@router.callback_query(F.data == "adm:survey_xlsx")
+async def cb_survey_xlsx(cq: CallbackQuery) -> None:
+    """Ответы опроса файлом: в переписке такой список читать неудобно."""
+    await answer_cq(cq, "Готовлю файл…")
+    async with session() as s:
+        path = await export_survey_xlsx(s, Path("data/export/survey.xlsx"))
+    await cq.message.answer_document(FSInputFile(path, filename="opros_nagrady.xlsx"),
+                                     caption="📥 Ответы опроса: листы «Ответы», «Сводка», «Пол × ответ».")
 
 
 @router.callback_query(F.data == "adm:stuck")

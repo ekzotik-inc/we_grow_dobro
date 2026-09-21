@@ -10,11 +10,16 @@ from apscheduler.triggers.cron import CronTrigger
 from apscheduler.triggers.interval import IntervalTrigger
 from sqlalchemy import select, text
 
+from pathlib import Path
+
+from aiogram.types import FSInputFile
+
 from . import keyboards as kb
 from . import services, texts
 from .bot.handlers.admin import broadcast
 from .config import settings
 from .db import SessionLocal
+from .export import export_survey_xlsx
 from .models import Broadcast
 
 log = logging.getLogger(__name__)
@@ -135,12 +140,16 @@ async def survey_report_job(bot: Bot) -> None:
             return
         report = await services.survey_report(s)
         parts = texts.survey_report(report)
+        # Таблицу прикладываем файлом: список в переписке читать неудобно.
+        path = await export_survey_xlsx(s, Path("data/export/survey.xlsx"))
         staff = sorted(set(await services.list_admin_tg_ids(s)) | settings.admin_ids | settings.pc_ids)
         sent = 0
         for tg_id in staff:
             try:
                 for part in parts:
                     await bot.send_message(tg_id, part)
+                await bot.send_document(tg_id, FSInputFile(path, filename="opros_nagrady.xlsx"),
+                                        caption="📥 Полная таблица ответов")
                 sent += 1
             except Exception as ex:  # noqa: BLE001
                 log.warning("итоги опроса не ушли %s: %s", tg_id, ex)

@@ -23,6 +23,67 @@ def _sheet(wb: Workbook, title: str, headers: list[str], rows: list[list]) -> No
         ws.column_dimensions[col[0].column_letter].width = min(max(10, width + 2), 60)
 
 
+async def export_survey_xlsx(s, path: Path, survey: str | None = None) -> Path:
+    """Ответы опроса отдельным файлом: в Telegram такой список читать невозможно."""
+    survey = survey or services.SURVEY_CODE
+    report = await services.survey_report(s, survey)
+    g_labels = dict(services.SURVEY_QUESTIONS["gender"]["options"])
+    p_labels = dict(services.SURVEY_QUESTIONS["psy"]["options"])
+
+    wb = Workbook()
+    wb.remove(wb.active)
+
+    rows = []
+    for item in report["finished"] + report["partial"]:
+        u = item["user"]
+        answers = item["answers"]
+        rows.append([
+            u.full_name or u.display_name,
+            f"@{u.username}" if u.username else "",
+            u.department or "",
+            f"{u.team.emoji} {u.team.name}" if u.team else "",
+            g_labels.get(answers.get("gender", ""), ""),
+            p_labels.get(answers.get("psy", ""), ""),
+            "полностью" if services.survey_next_question(answers) is None else "не закончил",
+            item["at"].strftime("%d.%m.%Y %H:%M") if item.get("at") else "",
+            u.tg_id,
+        ])
+    rows.sort(key=lambda r: str(r[0]).lower())
+    _sheet(wb, "Ответы",
+           ["ФИО", "Username", "Отдел", "Команда", "Пол", "Консультация психолога",
+            "Статус", "Когда ответил", "TG id"], rows)
+
+    finished = len(report["finished"])
+    summary = [
+        ["Участников в марафоне", report["invited"]],
+        ["Прошли опрос полностью", finished],
+        ["Начали и не закончили", len(report["partial"])],
+        ["Не открывали", max(report["invited"] - finished - len(report["partial"]), 0)],
+        ["", ""],
+    ]
+    for code, label in services.SURVEY_QUESTIONS["gender"]["options"]:
+        n = report["by_gender"].get(code, 0)
+        summary.append([label, n])
+    summary.append(["", ""])
+    for code, label in services.SURVEY_QUESTIONS["psy"]["options"]:
+        n = report["by_psy"].get(code, 0)
+        summary.append([f"Психолог: {label}", n])
+    _sheet(wb, "Сводка", ["Показатель", "Значение"], summary)
+
+    cross = []
+    for g_code, g_label in services.SURVEY_QUESTIONS["gender"]["options"]:
+        total_g = report["by_gender"].get(g_code, 0)
+        yes = report["cross"].get((g_code, "yes"), 0)
+        cross.append([g_label, total_g, yes, total_g - yes,
+                      f"{round(yes * 100 / total_g)}%" if total_g else "—"])
+    _sheet(wb, "Пол × ответ",
+           ["Пол", "Всего ответили", "Актуально", "Не актуально", "Доля «актуально»"], cross)
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    wb.save(path)
+    return path
+
+
 async def export_xlsx(s, path: Path) -> Path:
     wb = Workbook()
     wb.remove(wb.active)

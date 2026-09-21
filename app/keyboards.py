@@ -776,6 +776,7 @@ def survey_admin_kb() -> InlineKeyboardMarkup:
     kb = InlineKeyboardBuilder()
     kb.row(_btn("📤 Разослать опрос", "adm:survey_send", style="primary"))
     kb.row(_btn("📈 Итоги опроса", "adm:survey_report"))
+    kb.row(_btn("📥 Скачать Excel", "adm:survey_xlsx"))
     kb.row(_btn("⬅️ Панель", "adm"))
     return kb.as_markup()
 
