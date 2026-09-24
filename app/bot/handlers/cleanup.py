@@ -21,7 +21,7 @@ from ..common import answer_cq, edit, session
 log = logging.getLogger(__name__)
 router = Router(name="cleanup")
 
-DQ_REASON = "Не выполнено ни одного задания за марафон"
+DQ_REASON = "Неактивность: ни одного выполненного задания"
 
 
 class IsOwner(BaseFilter):

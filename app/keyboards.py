@@ -789,6 +789,24 @@ def preview_send_kb(action: str, back: str = "adm") -> InlineKeyboardMarkup:
     return kb.as_markup()
 
 
+# Готовые причины дисквалификации: «за неактивность» ещё и обнуляет результаты.
+DQ_REASONS = {
+    "idle": ("💤 За неактивность", "Неактивность: ни одного выполненного задания", True),
+    "rules": ("🚫 Нарушение правил марафона", "Нарушение правил марафона", False),
+    "fake": ("📝 Недостоверный отчёт", "Недостоверные данные в отчёте", False),
+    "left": ("👋 Покинул компанию", "Больше не сотрудник компании", False),
+}
+
+
+def dq_reason_kb(uid: int) -> InlineKeyboardMarkup:
+    kb = InlineKeyboardBuilder()
+    for code, (label, _, _) in DQ_REASONS.items():
+        kb.row(_btn(label, f"adm:dq_r:{uid}:{code}", style="danger"))
+    kb.row(_btn("✍️ Своя причина", f"adm:dq_own:{uid}"))
+    kb.row(_btn("⬅️ Отмена", f"adm:user:{uid}"))
+    return kb.as_markup()
+
+
 def stuck_kb(has_targets: bool) -> InlineKeyboardMarkup:
     """Отчёт «кто застрял»: сразу можно написать всем, кто не закончил."""
     kb = InlineKeyboardBuilder()

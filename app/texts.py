@@ -1692,12 +1692,18 @@ def disqualified_block(reason: str | None) -> str:
     )
 
 
-def push_disqualified(reason: str) -> str:
-    return (
-        f"{px('blocked')} <b>Ты снят с марафона</b>\n"
-        f"Причина: <i>{e(reason)}</i>\n\n"
-        + voice("Результаты больше не идут в командный зачёт. Если это ошибка — напиши сотруднику P&amp;C.")
-    )
+def push_disqualified(reason: str, cleared: dict | None = None) -> str:
+    """Уведомление о снятии. Если результаты обнулены — говорим и об этом, без сюрпризов."""
+    lines = [f"{px('blocked')} <b>Ты снят с марафона</b>", f"Причина: <i>{e(reason)}</i>", ""]
+    if cleared and (cleared.get("submissions") or cleared.get("points")):
+        lines.append(row("🗑", "Результаты обнулены",
+                         f"{cleared.get('submissions', 0)} отч.", f"{num(cleared.get('points', 0))} б."))
+        lines.append("")
+    lines.append("Задания, отчёты и рейтинг больше недоступны.")
+    lines.append("")
+    lines.append(voice(f"Если это ошибка — напиши {pc_link()}, разберёмся. "
+                       "Вернуть участие может только сотрудник P&amp;C."))
+    return "\n".join(lines)
 
 
 def push_reinstated() -> str:

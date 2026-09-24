@@ -422,16 +422,74 @@ async def cb_user(cq: CallbackQuery, state: FSMContext) -> None:
 
 @router.callback_query(F.data.regexp(r"^adm:dq:(\d+)$"))
 async def cb_dq(cq: CallbackQuery, state: FSMContext) -> None:
+    """Сначала выбираем причину: типовые — одной кнопкой, редкие — текстом."""
+    await state.clear()
     uid = int(cq.data.split(":")[2])
     async with session() as s:
         u = await services.get_user_by_id(s, uid)
         if u is None:
             await answer_cq(cq, "Участник не найден — возможно, его удалили.", alert=True)
             return
+        points = await services.user_points(s, u.id)
+        subs = len(await services.user_submissions(s, u.id))
+        name = u.display_name
+    await edit(cq, f"🚫 <b>Дисквалификация · {texts.e(name)}</b>\n\n"
+                   + texts.row("⭐", "Баллов сейчас", texts.num(points)) + "\n"
+                   + texts.row("📤", "Отчётов", str(subs)) + "\n\n"
+                   "Выберите причину — участник увидит её в уведомлении.\n"
+                   "<i>«За неактивность» дополнительно обнуляет результаты.</i>",
+               kb.dq_reason_kb(uid))
+    await answer_cq(cq)
+
+
+@router.callback_query(F.data.regexp(r"^adm:dq_r:(\d+):(\w+)$"))
+async def cb_dq_reason_preset(cq: CallbackQuery, state: FSMContext) -> None:
+    """Готовая причина: снимаем сразу, без ввода текста."""
+    await state.clear()
+    _, _, uid, code = cq.data.split(":")
+    preset = kb.DQ_REASONS.get(code)
+    if preset is None:
+        await answer_cq(cq, "Неизвестная причина", alert=True)
+        return
+    _, reason, wipe = preset
+    await _apply_disqualification(cq, int(uid), reason, wipe)
+
+
+@router.callback_query(F.data.regexp(r"^adm:dq_own:(\d+)$"))
+async def cb_dq_own(cq: CallbackQuery, state: FSMContext) -> None:
+    uid = int(cq.data.split(":")[2])
     await state.set_state(AdminFlow.dq_reason)
     await state.update_data({ANCHOR_KEY: cq.message.message_id, "uid": uid})
-    await edit(cq, f"🚫 <b>Дисквалификация {texts.e(u.display_name)}</b>\n\nНапиши причину сообщением (участник её увидит). Его баллы перестанут учитываться в командном зачёте.", kb.cancel_kb(f"adm:user:{uid}"))
+    await edit(cq, "✍️ <b>Своя причина</b>\n\nНапишите её сообщением — участник увидит текст.",
+               kb.cancel_kb(f"adm:user:{uid}"))
     await answer_cq(cq)
+
+
+async def _apply_disqualification(cq: CallbackQuery, uid: int, reason: str, wipe: bool) -> None:
+    """Снять участника, при необходимости обнулить результаты и уведомить его."""
+    async with session() as s:
+        u = await services.get_user_by_id(s, uid)
+        if u is None:
+            await answer_cq(cq, "Участник не найден", alert=True)
+            return
+        cleared = {"points": 0, "submissions": 0}
+        if wipe:
+            cleared = await services.clear_user_results(s, u, cq.from_user.id)
+        await services.disqualify(s, u, reason, cq.from_user.id)
+        await s.commit()
+        u = await services.get_user_by_id(s, uid)
+        tg_id = u.tg_id
+        text = await _user_card(s, u)
+    try:
+        await cq.bot.send_message(tg_id, texts.push_disqualified(reason, cleared if wipe else None))
+    except Exception as ex:  # noqa: BLE001
+        log.warning("не удалось уведомить %s о дисквалификации: %s", tg_id, ex)
+    head = f"🚫 <b>Дисквалифицирован</b>\n<i>{texts.e(reason)}</i>"
+    if wipe:
+        head += ("\n" + texts.row("🗑", "Обнулено", f"{cleared['submissions']} отчётов",
+                                  f"{texts.num(cleared['points'])} б."))
+    await edit(cq, head + "\n\n" + text, kb.admin_user_kb(u))
+    await answer_cq(cq, "Готово")
 
 
 @router.message(AdminFlow.dq_reason, F.text)
@@ -449,11 +507,12 @@ async def dq_reason(message: Message, state: FSMContext) -> None:
         await services.disqualify(s, u, reason, message.from_user.id)
         await s.commit()
         u = await services.get_user_by_id(s, uid)
+        tg_id = u.tg_id
         text = await _user_card(s, u)
     try:
-        await message.bot.send_message(u.tg_id, texts.push_disqualified(reason))
-    except Exception:  # noqa: BLE001
-        pass
+        await message.bot.send_message(tg_id, texts.push_disqualified(reason))
+    except Exception as ex:  # noqa: BLE001
+        log.warning("не удалось уведомить %s о дисквалификации: %s", tg_id, ex)
     await state.clear()
     await edit_anchor(message.bot, message.chat.id, state, "🚫 Участник дисквалифицирован.\n\n" + text, kb.admin_user_kb(u))
 

@@ -769,6 +769,59 @@ async def check_disqualified_blocked() -> None:
     print("disqualified blocked ok")
 
 
+async def check_disqualify_reasons() -> None:
+    """Дисквалификация по готовой причине: «за неактивность» ещё и обнуляет результаты."""
+    import app.keyboards as kbs
+
+    assert "idle" in kbs.DQ_REASONS, kbs.DQ_REASONS
+    label, reason, wipe = kbs.DQ_REASONS["idle"]
+    assert "неактивность" in label.lower() and wipe is True, kbs.DQ_REASONS["idle"]
+    # Остальные причины результаты не трогают.
+    assert all(not flag for code, (_, _, flag) in kbs.DQ_REASONS.items() if code != "idle")
+    markup = kbs.dq_reason_kb(7)
+    flat = [b for row in markup.inline_keyboard for b in row]
+    assert len(flat) == len(kbs.DQ_REASONS) + 2, flat  # причины + «своя» + отмена
+    assert all(b.callback_data.startswith(("adm:dq_r:7:", "adm:dq_own:7", "adm:user:7"))
+               for b in flat)
+
+    async with SessionLocal() as s:
+        await services.set_week_open(s, 1, True)
+        await s.commit()
+        await services.load_open_weeks(s)
+        u = await services.get_or_create_user(s, 9901, "idle")
+        await services.register_user(s, u, "Неактивный Иванов", "IT", "Ташкент")
+        await services.approve_user(s, u, 999)
+        await s.commit()
+        task = next(t for t in await services.list_tasks(s, 1) if not t.has_options)
+        sub = await services.start_submission(s, u, task, None)
+        await fill_steps(s, sub)
+        await services.send_for_review(s, sub)
+        await s.commit()
+        sub = await services.get_submission(s, sub.id)
+        await services.review_submission(s, sub, True, 999)
+        await s.commit()
+        assert await services.user_points(s, u.id) > 0
+
+        cleared = await services.clear_user_results(s, u, 999)
+        await services.disqualify(s, u, reason, 999)
+        await s.commit()
+        assert cleared["submissions"] >= 1 and cleared["points"] > 0, cleared
+        assert u.status == UserStatus.disqualified and u.disqualified_reason == reason
+        assert await services.user_points(s, u.id) == 0, "результаты должны обнулиться"
+        assert await services.user_submissions(s, u.id) == []
+
+        push = texts.push_disqualified(reason, cleared)
+        assert "снят с марафона" in push and "Результаты обнулены" in push
+        assert str(cleared["submissions"]) in push
+        assert len(push) <= 4096
+        # Без обнуления — про результаты не пишем.
+        assert "обнулены" not in texts.push_disqualified("Нарушение правил марафона")
+
+        await services.reinstate(s, u, 999)
+        await s.commit()
+    print("disqualify reasons ok")
+
+
 async def check_survey() -> None:
     """Опрос: второй вопрос только после первого, ответы переписываются, отчёт считает разрезы."""
     import datetime
@@ -1947,6 +2000,7 @@ async def main() -> None:
     await check_manual_results()
     await check_team_moves()
     await check_disqualified_blocked()
+    await check_disqualify_reasons()
     await check_survey()
     await check_cleanup()
     await check_week_switch_schedule()
