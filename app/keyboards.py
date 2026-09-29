@@ -704,6 +704,7 @@ def announce_kb() -> InlineKeyboardMarkup:
     kb.row(_btn("💚 Мотивация недели", "adm:weekly"))
     kb.row(_btn("💡 Инструкция дня", "adm:howto"), _btn("🎯 Личные подсказки", "adm:nudge"))
     kb.row(_btn("🔍 Кто ещё не сдал", "adm:stuck"))
+    kb.row(_btn("🎬 Ролик добрых дел", "adm:film"))
     kb.row(_btn("🌿 Анонс Eco Photo Assistant", "adm:eco"))
     kb.row(_btn("🤫 Извинение от Добрика", "adm:sorry"))
     kb.row(_btn("📊 Опрос про награды", "adm:survey"))

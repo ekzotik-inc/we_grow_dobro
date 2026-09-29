@@ -574,6 +574,25 @@ def current_week():
     return settings.week(numbers[-1]) if numbers else None
 
 
+def reminder_due_week():
+    """Неделя, для которой сегодня уместно напоминание «остался последний день».
+
+    Недели марафона живут не по календарю, а по выключателям заданий: пока неделя не
+    включена или уже закрыта, никакого «завтра конец» быть не может. Поэтому срок
+    считаем только у открытой недели и только если сегодня действительно её предпоследний
+    день — иначе в воскресенье (и в любой другой день) напоминание не уходит.
+    """
+    cw = current_week()
+    if cw is None or not week_is_open(cw.number):
+        return None
+    today = settings.today()
+    if not cw.contains(today):
+        return None
+    if (cw.end - today).days != 1:
+        return None
+    return cw
+
+
 def task_is_open(task: Task) -> bool:
     return task.is_active and week_is_open(task.week)
 
@@ -1075,6 +1094,32 @@ async def gallery_items(s, week: int | None = None) -> list[Submission]:
 def gallery_media(sub: Submission) -> list[dict]:
     """Только фотографии и видео: документы в карусель не ставим."""
     return [f for f in (sub.files or []) if f.get("type") in ("photo", "video")][:10]
+
+
+async def kindness_stats(s) -> dict:
+    """Сколько добрых дел уже сделано: считаем по принятым отчётам, а не по заявкам.
+
+    Нужно для мотивационного ролика: цифры должны быть те же, что участник видит в
+    рейтинге, иначе сообщение перестанут читать.
+    """
+    subs = list((await s.execute(
+        _sub_query().where(Submission.status == SubmissionStatus.approved))).scalars())
+    subs = [x for x in subs if x.user.status != UserStatus.disqualified]
+    people = {x.user_id for x in subs}
+    teams = {x.user.team_id for x in subs if x.user.team_id}
+    photos = sum(len([f for f in (x.files or []) if f.get("type") == "photo"]) for x in subs)
+    by_task: dict[str, int] = {}
+    for x in subs:
+        by_task[x.task.title] = by_task.get(x.task.title, 0) + 1
+    top_task = max(by_task.items(), key=lambda kv: kv[1])[0] if by_task else None
+    return {
+        "deeds": len(subs),
+        "people": len(people),
+        "teams": len(teams),
+        "photos": photos,
+        "points": sum(x.points_awarded or 0 for x in subs),
+        "top_task": top_task,
+    }
 
 
 async def nudge_for_user(s, user: User) -> tuple[str, dict] | None:

@@ -1905,3 +1905,32 @@ def weekly_motivation(week: int | None, tasks: list[Task], rows: list[dict], ind
     lines.append(voice(WEEKLY_CLOSERS[index % len(WEEKLY_CLOSERS)] +
                        "\nЖми «Задания недели» — покажу, что осталось."))
     return "\n".join(lines)
+
+
+def kindness_film(stats: dict, frames: int, seconds: float) -> str:
+    """Подпись к ролику из работ участников. Лимит подписи в Telegram — 1024 знака."""
+    deeds = stats["deeds"]
+    people = stats["people"]
+    lines = [
+        f"{px('heart')} <b>Мы посмотрели, что вы уже сделали</b>",
+        f"<i>{num(deeds)} {plural(deeds, 'доброе дело', 'добрых дела', 'добрых дел')} · "
+        f"{num(people)} {plural(people, 'участник', 'участника', 'участников')} · "
+        f"{num(stats['teams'])} {plural(stats['teams'], 'команда', 'команды', 'команд')}</i>",
+        "",
+        f"В ролике — {frames} {plural(frames, 'кадр', 'кадра', 'кадров')} ваших работ, "
+        f"{seconds:.0f} сек.",
+    ]
+    if stats["top_task"]:
+        lines.append(f"Чаще всего выбирали: <b>{e(stats['top_task'])}</b>.")
+    lines += ["", voice(
+        "Я пересмотрел все ваши отчёты и, честно, комок в горле. Тут чьи-то книги на полке, "
+        "чей-то тёплый обед, чьи-то руки, которые кому-то помогли. Это не «задания» — это "
+        "живые люди, которым стало лучше из-за вас.\n"
+        f"Спасибо, что вы такие {plain('heart')} Вы большие молодцы.")]
+    return "\n".join(lines)
+
+
+def kindness_film_empty() -> str:
+    return (f"{px('thinking')} <b>Пока нечего показать</b>\n"
+            "В принятых отчётах ещё нет фотографий — ролик соберётся, когда P&C зачтёт "
+            "первые работы с фото.")

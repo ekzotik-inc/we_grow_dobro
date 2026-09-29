@@ -94,7 +94,9 @@ async def last_call_job(bot: Bot, force: bool = False) -> int:
     from .bot.handlers.admin import send_to_users
 
     cw = services.current_week()
-    if not cw or (not force and settings.today() != cw.end):
+    if not cw or not services.week_is_open(cw.number):
+        return 0
+    if not force and settings.today() != cw.end:
         return 0
     deadline = "%02d:%02d" % settings.close_at
     async with SessionLocal() as s:
@@ -268,11 +270,8 @@ async def announce_week_job(bot: Bot) -> None:
 
 async def reminder_job(bot: Bot) -> None:
     """Day before the week's deadline: nudge participants who have not submitted anything this week."""
-    cw = services.current_week()
+    cw = services.reminder_due_week()
     if not cw:
-        return
-    days_left = (cw.end - settings.today()).days
-    if days_left != 1:
         return
     kind = f"reminder:{cw.number}"
     async with SessionLocal() as s:

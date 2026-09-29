@@ -5,7 +5,9 @@ Run:  BOT_TOKEN=test:token DATABASE_URL=sqlite+aiosqlite:///./data/smoke.db pyth
 from __future__ import annotations
 
 import asyncio
+import io
 import os
+import tempfile
 from pathlib import Path
 
 os.environ.setdefault("BOT_TOKEN", "123:test-token")
@@ -1388,6 +1390,92 @@ async def check_step_requirements() -> None:
     print("step requirements ok")
 
 
+async def check_reminder_schedule() -> None:
+    """Пуш «остался день» уходит только у открытой недели и только накануне её конца.
+
+    Раньше срок считался по календарю, и в выходной участники получали ложное
+    «неделя закончится завтра». Проверяем каждый день марафона.
+    """
+    import datetime
+
+    from app.config import settings as cfg
+
+    original_today = cfg.today
+    async with SessionLocal() as s:
+        try:
+            # Ни одной открытой недели — напоминаний нет вообще.
+            for w in cfg.weeks:
+                await services.set_week_open(s, w.number, False)
+            await s.commit()
+            day = cfg.weeks[0].start
+            last = cfg.weeks[-1].end + datetime.timedelta(days=3)
+            while day <= last:
+                cfg.today = lambda d=day: d
+                assert services.reminder_due_week() is None, day
+                day += datetime.timedelta(days=1)
+
+            # Открыта вторая неделя: срабатывает ровно один день — накануне её конца.
+            await services.set_week_open(s, 2, True)
+            await s.commit()
+            week2 = cfg.week(2)
+            fired = []
+            day = cfg.weeks[0].start
+            while day <= last:
+                cfg.today = lambda d=day: d
+                due = services.reminder_due_week()
+                if due:
+                    fired.append(day)
+                day += datetime.timedelta(days=1)
+            assert fired == [week2.end - datetime.timedelta(days=1)], fired
+            assert all(d.weekday() != 6 for d in fired), "в воскресенье пуша быть не должно"
+
+            # Текст в этот день называет верный срок.
+            cfg.today = lambda: fired[0]
+            assert "заканчивается завтра" in texts.week_reminder(2)
+        finally:
+            cfg.today = original_today
+            for w in cfg.weeks:
+                await services.set_week_open(s, w.number, w.number == 1)
+            await s.commit()
+            await services.load_open_weeks(s)
+    print("reminder schedule ok")
+
+
+async def check_kindness_film() -> None:
+    """Ролик добрых дел: кадры из принятых работ, не длиннее 30 секунд."""
+    from PIL import Image
+
+    from app import hype
+
+    buf = io.BytesIO()
+    Image.new("RGB", (900, 600), (20, 120, 90)).save(buf, format="JPEG")
+    raw = buf.getvalue()
+
+    frame = hype.make_frame(raw, "Иван Петров · Команда 1", "Корпоративная библиотека")
+    assert frame.size == (hype.W, hype.H)
+
+    path = Path(tempfile.gettempdir()) / "smoke_kindness.gif"
+    # Кадры делаем разными: одинаковые GIF схлопывает, и проверка длительности станет ложной.
+    many = [hype.make_frame(raw, f"Участник {i}", "Дело") for i in range(hype.max_frames() + 10)]
+    hype.save_gif(many, path)
+    with Image.open(path) as gif:
+        assert gif.n_frames == hype.max_frames(), gif.n_frames
+        assert hype.duration_seconds(gif.n_frames) <= 30
+    path.unlink()
+
+    async with SessionLocal() as s:
+        stats = await services.kindness_stats(s)
+    for key in ("deeds", "people", "teams", "photos", "points"):
+        assert key in stats, key
+    caption = texts.kindness_film({"deeds": 128, "people": 46, "teams": 9, "photos": 200,
+                                   "points": 4000, "top_task": "Корпоративная библиотека"},
+                                  24, 28.8)
+    assert len(caption) <= 1024, len(caption)
+    assert "молодцы" in caption and "Добрик" in caption
+    assert len(texts.kindness_film_empty()) <= 1024
+    print("kindness film ok")
+
+
 def check_week_reminder_dates() -> None:
     """Напоминание обязано называть настоящий срок: «завтра» — только если завтра."""
     import datetime
@@ -2010,6 +2098,8 @@ async def main() -> None:
     await check_nudges()
     await check_step_requirements()
     check_week_reminder_dates()
+    await check_reminder_schedule()
+    await check_kindness_film()
     check_eco_menu_button()
     check_eco_announce()
     check_ready_screen()

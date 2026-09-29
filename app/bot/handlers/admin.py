@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import tempfile
 from pathlib import Path
 
 from aiogram import F, Router
@@ -1391,6 +1392,71 @@ async def cb_sorry_ok(cq: CallbackQuery) -> None:
                             f"apology:{cw.number}:{settings.now():%Y-%m-%d %H:%M}",
                             markup=kb.push_kb())
     await edit(cq, f"🤫 Извинение отправлено {n} участникам.", kb.back_kb("adm", "🛠 Панель"))
+
+
+# ---------- ролик добрых дел ----------
+
+# file_id ролика живёт между нажатиями: собираем анимацию один раз (это долго — надо
+# скачать десятки фотографий), а рассылаем уже готовый файл по его id.
+_film: dict[str, object] = {}
+
+
+async def _build_film(bot) -> tuple[str, str] | None:
+    """Собрать ролик и загрузить его в Telegram. Возвращает (file_id, подпись)."""
+    from ... import hype
+
+    async with session() as s:
+        subs = await services.gallery_items(s)
+        stats = await services.kindness_stats(s)
+    if not subs:
+        return None
+    out = Path(tempfile.gettempdir()) / "kindness.gif"
+    built = await hype.build_from_submissions(bot, subs, out)
+    if not built:
+        return None
+    path, frames = built
+    caption = texts.kindness_film(stats, frames, hype.duration_seconds(frames))
+    return str(path), caption
+
+
+@router.callback_query(F.data == "adm:film")
+async def cb_film(cq: CallbackQuery) -> None:
+    """Предпросмотр: сначала ролик видит сотрудник, и только потом — участники."""
+    await answer_cq(cq, "Собираю ролик, это займёт до минуты…")
+    built = await _build_film(cq.bot)
+    if not built:
+        await edit(cq, texts.kindness_film_empty(), kb.back_kb("adm:announce", "⬅️ Назад"))
+        return
+    path, caption = built
+    sent = await cq.bot.send_animation(cq.message.chat.id, FSInputFile(path), caption=caption,
+                                       reply_markup=kb.preview_send_kb("adm:film_ok", "adm:announce"))
+    _film["id"] = sent.animation.file_id
+    _film["caption"] = caption
+
+
+@router.callback_query(F.data == "adm:film_ok")
+async def cb_film_ok(cq: CallbackQuery) -> None:
+    file_id, caption = _film.get("id"), _film.get("caption")
+    if not file_id:
+        await answer_cq(cq, "Ролик устарел — соберите заново", alert=True)
+        return
+    await answer_cq(cq, "Рассылаю…")
+    kind = f"film:{settings.now():%Y-%m-%d %H:%M}"
+    n = 0
+    async with session() as s:
+        users = [u for u in await services.list_participants(s)
+                 if u.status == UserStatus.registered]
+        for u in users:
+            try:
+                await cq.bot.send_animation(u.tg_id, file_id, caption=caption,
+                                            reply_markup=kb.push_kb("gal", "🖼 Смотреть галерею"))
+                n += 1
+            except Exception as ex:  # noqa: BLE001
+                log.warning("ролик не ушёл %s: %s", u.tg_id, ex)
+            await asyncio.sleep(0.05)
+        s.add(Broadcast(kind=kind, recipients=n))
+        await s.commit()
+    await cq.message.answer(f"🎬 Ролик отправлен {n} участникам.", reply_markup=kb.back_kb("adm", "🛠 Панель"))
 
 
 # ---------- stats / export ----------
