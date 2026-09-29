@@ -36,8 +36,11 @@ def max_frames() -> int:
 def _font(path: Path, size: int) -> ImageFont.FreeTypeFont:
     try:
         return ImageFont.truetype(str(path), size)
-    except OSError:  # системы без DejaVu — не повод ронять рассылку
-        return ImageFont.load_default()
+    except OSError:  # на хостинге системных шрифтов может не быть — рассылку это не роняет
+        try:
+            return ImageFont.load_default(size)
+        except TypeError:  # Pillow старее 10
+            return ImageFont.load_default()
 
 
 def _fit(text: str, font, draw: ImageDraw.ImageDraw, width: int) -> str:

@@ -7,5 +7,6 @@ asyncpg>=0.29          # Postgres на хостинге (Render); локальн
 apscheduler>=3.10,<4
 python-dotenv>=1.0
 openpyxl>=3.1
+Pillow>=10.0            # ролик добрых дел: сборка GIF из фотографий участников
 # Windows has no system timezone database — zoneinfo needs this package there.
 tzdata>=2024.1

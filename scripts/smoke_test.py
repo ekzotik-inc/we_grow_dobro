@@ -1441,6 +1441,21 @@ async def check_reminder_schedule() -> None:
     print("reminder schedule ok")
 
 
+def check_runtime_requirements() -> None:
+    """Всё, что бот импортирует на хостинге, должно быть в requirements.txt.
+
+    Ролик добрых дел собирается через Pillow: пока его не было в зависимостях, кнопка
+    на сервере просто молчала — импорт падал внутри обработчика.
+    """
+    req = Path("requirements.txt").read_text(encoding="utf-8").lower()
+    need = {"PIL": "pillow", "aiogram": "aiogram", "openpyxl": "openpyxl"}
+    src = "\n".join(f.read_text(encoding="utf-8") for f in Path("app").rglob("*.py"))
+    for module, package in need.items():
+        if f"import {module}" in src or f"from {module}" in src:
+            assert package in req, f"{package} нет в requirements.txt, а app его импортирует"
+    print("runtime requirements ok")
+
+
 async def check_kindness_film() -> None:
     """Ролик добрых дел: кадры из принятых работ, не длиннее 30 секунд."""
     from PIL import Image
@@ -2099,6 +2114,7 @@ async def main() -> None:
     await check_step_requirements()
     check_week_reminder_dates()
     await check_reminder_schedule()
+    check_runtime_requirements()
     await check_kindness_film()
     check_eco_menu_button()
     check_eco_announce()

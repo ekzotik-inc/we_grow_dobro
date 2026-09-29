@@ -1402,7 +1402,7 @@ _film: dict[str, object] = {}
 
 
 async def _build_film(bot) -> tuple[str, str] | None:
-    """Собрать ролик и загрузить его в Telegram. Возвращает (file_id, подпись)."""
+    """Собрать ролик и вернуть (путь к файлу, подпись). None — если показывать нечего."""
     from ... import hype
 
     async with session() as s:
@@ -1421,16 +1421,36 @@ async def _build_film(bot) -> tuple[str, str] | None:
 
 @router.callback_query(F.data == "adm:film")
 async def cb_film(cq: CallbackQuery) -> None:
-    """Предпросмотр: сначала ролик видит сотрудник, и только потом — участники."""
-    await answer_cq(cq, "Собираю ролик, это займёт до минуты…")
-    built = await _build_film(cq.bot)
+    """Предпросмотр: сначала ролик видит сотрудник, и только потом — участники.
+
+    Сборка долгая (нужно скачать десятки фотографий), поэтому экран сразу меняется на
+    «собираю»: иначе кажется, что кнопка не работает. Любая ошибка показывается здесь же,
+    а не уходит молча в лог.
+    """
+    await answer_cq(cq)
+    await edit(cq, "🎬 <b>Собираю ролик добрых дел</b>\n<i>скачиваю работы участников, это займёт до минуты…</i>",
+               kb.back_kb("adm:announce", "⬅️ Назад"))
+    try:
+        built = await _build_film(cq.bot)
+    except Exception as ex:  # noqa: BLE001
+        log.exception("ролик не собрался")
+        await edit(cq, f"⚠️ <b>Ролик не собрался</b>\n<code>{texts.e(str(ex)[:300])}</code>",
+                   kb.back_kb("adm:announce", "⬅️ Назад"))
+        return
     if not built:
         await edit(cq, texts.kindness_film_empty(), kb.back_kb("adm:announce", "⬅️ Назад"))
         return
     path, caption = built
-    sent = await cq.bot.send_animation(cq.message.chat.id, FSInputFile(path), caption=caption,
-                                       reply_markup=kb.preview_send_kb("adm:film_ok", "adm:announce"))
-    _film["id"] = sent.animation.file_id
+    try:
+        sent = await cq.bot.send_animation(
+            cq.message.chat.id, FSInputFile(path), caption=caption,
+            reply_markup=kb.preview_send_kb("adm:film_ok", "adm:announce"))
+    except Exception as ex:  # noqa: BLE001
+        log.exception("ролик не отправился")
+        await edit(cq, f"⚠️ <b>Ролик собрался, но Telegram его не принял</b>\n<code>{texts.e(str(ex)[:300])}</code>",
+                   kb.back_kb("adm:announce", "⬅️ Назад"))
+        return
+    _film["id"] = sent.animation.file_id if sent.animation else sent.document.file_id
     _film["caption"] = caption
 
 
